@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.alerts import ALERTS, STALE_SECONDS
+from app.analytics import resolve_o2_thresholds
 from app.models import OwletReading
 from app.owlet_client import OwletClient
 from app.quality import is_offline_reading
@@ -108,6 +111,7 @@ class Poller:
             try:
                 reading = await self.read_once()
                 await self.store.insert_reading(reading, account_id=self.account_id)
+                await self._feed_alerts(reading)
                 await self._check_custom_alert(reading)
                 await self._persist_tokens()
                 logger.info(
@@ -129,6 +133,27 @@ class Poller:
             except Exception:
                 logger.exception("Readiness report failed; will retry")
             await asyncio.sleep(self.interval_seconds)
+
+    async def _feed_alerts(self, reading: OwletReading) -> None:
+        """Feed the amber/red monitor-flash alert engine. Isolated so an alert
+        bug can never break data collection."""
+        if self.account_id is None:
+            return
+        try:
+            account = await self.store.get_account(self.account_id)
+            prefs = account.get("dashboard_preferences") or {}
+            warn, critical = resolve_o2_thresholds(prefs)
+            name = str(account.get("display_name") or account.get("email") or "Owlet account")
+            # A slow poll interval mustn't make every device look stale.
+            stale_after = max(STALE_SECONDS, 2 * self.interval_seconds + 15)
+            ALERTS.observe(
+                self.account_id, name, reading, warn, critical, time.time(),
+                stale_after=stale_after,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Alert engine failed; collection continues")
 
     async def _check_custom_alert(self, reading: OwletReading) -> None:
         """User-configurable low-O2 alert: crossing below the account's chosen

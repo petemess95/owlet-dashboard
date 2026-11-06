@@ -1,0 +1,71 @@
+<!doctype html>
+<!-- Monitor-flash alert overlay. The Rust alert thread positions this window over
+     a monitor and pushes state via the "overlay-state" event. 1 Hz flash (well
+     under the 3 Hz photosensitivity guideline). Click anywhere = snooze 15 s. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Owlet alert</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+    font-family: "Segoe UI", system-ui, sans-serif; cursor: pointer; user-select: none; }
+  #flash { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.6); }
+  #flash.on { display: flex; }
+  #flash.full.lit { background: var(--c); }
+  #flash.border { pointer-events: none; box-sizing: border-box; border: 40px solid transparent; }
+  #flash.border.lit { border-color: var(--c); }
+  #flash.border .txt { display: none; }
+  .big { font-size: 14vh; font-weight: 800; line-height: 1; }
+  .small { font-size: 3.2vh; margin-top: 2.5vh; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="flash">
+  <div class="txt big" id="big"></div>
+  <div class="txt small" id="who"></div>
+  <div class="txt small">Click anywhere to snooze 15 s</div>
+</div>
+<script>
+(function () {
+  var COLORS = { amber: "rgba(255,140,0,.55)", red: "rgba(255,26,26,.55)" };
+  var BORDER = { amber: "#ff8c00", red: "#ff1a1a" };
+  var T = window.__TAURI__;
+  var el = document.getElementById("flash");
+  var state = null, lit = true;
+
+  function apply(s) {
+    state = s;
+    if (!s || (s.level !== "amber" && s.level !== "red")) { el.className = ""; return; }
+    var border = s.mode === "border";
+    el.style.setProperty("--c", border ? BORDER[s.level] : COLORS[s.level]);
+    document.getElementById("big").textContent = s.spo2 != null ? "SpO₂ " + s.spo2 + "%" :
+      (s.level === "red" ? "RED ALERT" : "Low oxygen");
+    document.getElementById("who").textContent = s.device_name || "";
+    lit = true;
+    paint();
+  }
+
+  function paint() {
+    if (!state || (state.level !== "amber" && state.level !== "red")) return;
+    el.className = "on " + (state.mode === "border" ? "border" : "full") + (lit ? " lit" : "");
+  }
+
+  setInterval(function () { lit = !lit; paint(); }, 500);
+
+  document.addEventListener("mousedown", function () {
+    if (!state || state.mode === "border") return;
+    el.className = "";
+    state = null;
+    if (T) T.core.invoke("snooze_alert").catch(function () {});
+  });
+
+  if (T) {
+    T.event.listen("overlay-state", function (e) { apply(e.payload); });
+    // Catch up if the first event fired before this page finished loading.
+    T.core.invoke("overlay_state").then(apply).catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>

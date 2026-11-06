@@ -8,14 +8,20 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
+# Remembers where the widget (and main window) were left.
+tauri-plugin-window-state = "2"
+# Closing hides to the tray, so a second launch must surface the first copy
+# instead of starting another tray icon, widget and alarm thread.
+tauri-plugin-single-instance = "2"
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
 # SetCurrentProcessExplicitAppUserModelID: without it, Windows drops our toasts
 # because the process AUMID doesn't match the installer's shortcut AUMID.
-windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation"] }
+# Win32_Media_Audio: PlaySoundW for the looping red-alert alarm.
+windows = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_Media_Audio"] }
 # We call this crate directly instead of tauri-plugin-notification: the plugin
 # routes through notify-rust, whose show() registers activation handlers on a
 # spawned task and swallows the error, and the toast never actually appears.

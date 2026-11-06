@@ -3,7 +3,13 @@ fn main() {
     // (autogenerates the `allow-show-native-toast` permission).
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(
-            tauri_build::AppManifest::new().commands(&["show_native_toast"]),
+            tauri_build::AppManifest::new().commands(&[
+                "show_native_toast",
+                "snooze_alert",
+                "show_main",
+                "hide_widget",
+                "overlay_state",
+            ]),
         ),
     )
     .expect("failed to run tauri-build");

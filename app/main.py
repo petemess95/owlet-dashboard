@@ -13,8 +13,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from pydantic import BaseModel
 
-from app import auth_pages
+from app import auth_pages, widget_page
+from app.alerts import ALERTS, SNOOZE_SECONDS
+from app.alerts import _iso as alert_iso
 from app.analytics import (
     O2_THRESHOLD_MAX,
     O2_THRESHOLD_MIN,
@@ -92,6 +95,11 @@ async def _probe_owlet_instance(url: str) -> bool:
         return await asyncio.to_thread(_get)
     except Exception:
         return False
+
+
+class AlertTestBody(BaseModel):
+    level: Literal["amber", "red", "none"]
+    seconds: int | None = None
 
 
 def _reading_response(row, *, include_raw: bool = False) -> dict[str, object]:
@@ -1025,6 +1033,28 @@ def create_app(
         return await _widget_payload(
             store, hours=hours, device=device, account_ids=await _scope(user, account)
         )
+
+    @app.get("/api/alert-state")
+    async def alert_state(user: dict = Depends(require_user)):
+        return ALERTS.state(await _scope(user, None), bool(state.get("pollers")), time.time())
+
+    @app.post("/api/alert/snooze")
+    async def alert_snooze(user: dict = Depends(require_user)):
+        until = ALERTS.snooze(await _scope(user, None), time.time())
+        return {
+            "snoozed_until": alert_iso(until),
+            "snooze_seconds": SNOOZE_SECONDS,
+        }
+
+    @app.post("/api/alert/test")
+    async def alert_test(body: AlertTestBody, user: dict = Depends(require_user)):
+        now = time.time()
+        ALERTS.set_test(body.level, body.seconds, now)
+        return ALERTS.state(await _scope(user, None), bool(state.get("pollers")), now)
+
+    @app.get("/widget")
+    async def widget_window(user: dict = Depends(require_user)):
+        return HTMLResponse(widget_page.render())
 
     @app.get("/share/{token}/api/widget")
     async def shared_widget(
