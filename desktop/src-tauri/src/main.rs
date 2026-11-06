@@ -81,83 +81,10 @@ fn show_native_toast(app: tauri::AppHandle, title: String, body: String) {
     let _ = (app, title, body);
 }
 
-/// Show a short message in the window without a dialog plugin — a plain alert
-/// on whatever page is loaded (works in local and remote mode alike).
-fn alert(app: &tauri::AppHandle, message: &str) {
-    if let Some(win) = app.get_webview_window("main") {
-        // JSON-encode so quotes/newlines in the message can't break the eval.
-        let json = serde_json::to_string(message).unwrap_or_else(|_| "\"\"".into());
-        let _ = win.eval(&format!("window.alert({json})"));
-    }
-}
-
-/// Check for a newer release and, if one exists, download + verify + install it,
-/// then relaunch. `silent` is used for the automatic on-launch check: it stays
-/// quiet when already current or the check fails, so a flaky network or a
-/// missing manifest never nags. The menu's "Check for updates…" passes false so
-/// the user always gets a result.
-async fn run_update(app: tauri::AppHandle, silent: bool) {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let updater = match app.updater() {
-        Ok(updater) => updater,
-        Err(err) => {
-            log_line(&format!("updater unavailable: {err}"));
-            if !silent {
-                alert(&app, "Updates aren't available in this build.");
-            }
-            return;
-        }
-    };
-
-    let current = app.package_info().version.to_string();
-    match updater.check().await {
-        Ok(Some(update)) => {
-            log_line(&format!("update available: {} (on {current})", update.version));
-            alert(
-                &app,
-                &format!(
-                    "Owlet Dashboard {} is available (you're on {current}). \
-                     Installing now — the app will restart.",
-                    update.version
-                ),
-            );
-            // Stop the sidecar first. The updater terminates the shell to swap
-            // its exe, but that abrupt kill skips our Exit handler, so the
-            // sidecar is left running — and the installer then blocks on a
-            // "close the running application" prompt trying to replace it.
-            kill_sidecar(&app);
-            match update.download_and_install(|_, _| {}, || {}).await {
-                Ok(_) => {
-                    log_line("update installed; restarting");
-                    app.restart();
-                }
-                Err(err) => {
-                    log_line(&format!("update install failed: {err}"));
-                    alert(&app, "Could not install the update. Please try again later.");
-                }
-            }
-        }
-        Ok(None) => {
-            log_line("no update available");
-            if !silent {
-                alert(&app, &format!("You're on the latest version ({current})."));
-            }
-        }
-        Err(err) => {
-            log_line(&format!("update check failed: {err}"));
-            if !silent {
-                alert(&app, "Couldn't reach the update server. Please try again later.");
-            }
-        }
-    }
-}
-
 fn main() {
     log_line("--- app start ---");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![show_native_toast])
         .manage(ServerProcess(Mutex::new(None)))
         .menu(|handle| {
@@ -168,18 +95,11 @@ fn main() {
             let instance = SubmenuBuilder::new(handle, "Instance")
                 .text("switch", "Switch server\u{2026}")
                 .text("reload", "Reload")
-                .separator()
-                .text("check-updates", "Check for updates\u{2026}")
                 .build()?;
             MenuBuilder::new(handle).item(&instance).build()
         })
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
-            if id == "check-updates" {
-                let app = app.clone();
-                tauri::async_runtime::spawn(run_update(app, false));
-                return;
-            }
             if let Some(win) = app.get_webview_window("main") {
                 if id == "switch" {
                     if let Ok(url) = launcher_url().parse::<tauri::Url>() {
@@ -235,10 +155,8 @@ fn main() {
                 Ok(win) => {
                     log_line("window created");
                     let _ = win.set_focus();
-                    // Quiet self-update: check shortly after launch so a new
-                    // release installs without the user hunting for it. Silent —
-                    // no news is no interruption; failures just log.
-                    tauri::async_runtime::spawn(run_update(app.handle().clone(), true));
+                    // Auto-update is disabled in this fork: upstream's release
+                    // feed would replace this build and drop local changes.
                     Ok(())
                 }
                 Err(err) => {
