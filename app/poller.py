@@ -105,6 +105,8 @@ class Poller:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
                 await asyncio.wait_for(asyncio.shield(self._task), timeout=drain_timeout)
+        if self.account_id is not None:
+            ALERTS.forget_account(self.account_id)
 
     async def _run(self) -> None:
         while not self._stop.is_set():
@@ -137,7 +139,8 @@ class Poller:
     async def _feed_alerts(self, reading: OwletReading) -> None:
         """Feed the amber/red monitor-flash alert engine. Isolated so an alert
         bug can never break data collection."""
-        if self.account_id is None:
+        # A poll still in flight when stop() ran must not re-add the device.
+        if self.account_id is None or self._stop.is_set():
             return
         try:
             account = await self.store.get_account(self.account_id)

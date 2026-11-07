@@ -8,9 +8,9 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
@@ -27,6 +27,9 @@ const SERVER_ADDR: (&str, u16) = ("127.0.0.1", 8877);
 const ALERT_POLL: Duration = Duration::from_secs(2);
 const HTTP_TIMEOUT: Duration = Duration::from_millis(1500);
 const FAILS_BEFORE_GIVING_UP: u32 = 3;
+/// How long a server outage after an alert keeps warning in amber (matches the
+/// sidecar's SIGNAL_LOST_SECONDS), so a dead server can't flash forever.
+const SIGNAL_LOST_WINDOW: Duration = Duration::from_secs(600);
 const WIDGET_W: f64 = 300.0;
 const WIDGET_H: f64 = 120.0;
 const WIDGET_MARGIN: f64 = 16.0;
@@ -36,11 +39,55 @@ struct ServerProcess(Mutex<Option<CommandChild>>);
 
 /// Shell-side alert/UI state shared by the alert thread, commands and menus.
 struct Shell {
+    tray_available: AtomicBool,
     widget_toggle: Mutex<Option<MenuItem<Wry>>>,
     /// Last payload pushed to the overlay page (it fetches this on load).
     overlay_payload: Mutex<Value>,
     /// What the alert thread last applied; cleared to force a re-apply.
-    applied: Mutex<String>,
+    applied: Mutex<AppliedState>,
+    snooze_generation: AtomicU64,
+}
+
+struct AppliedState {
+    key: String,
+    level: String,
+    snoozed_until: Option<Instant>,
+    /// When the server last answered; bounds the unreachable warning.
+    last_seen: Option<Instant>,
+}
+
+impl Default for Shell {
+    fn default() -> Self {
+        Self {
+            tray_available: AtomicBool::new(false),
+            widget_toggle: Mutex::new(None),
+            overlay_payload: Mutex::new(json!({ "level": "none" })),
+            applied: Mutex::new(AppliedState {
+                key: "none".into(),
+                level: "none".into(),
+                snoozed_until: None,
+                last_seen: None,
+            }),
+            snooze_generation: AtomicU64::new(0),
+        }
+    }
+}
+
+impl Shell {
+    fn poll_state(&self, generation: u64) -> Option<MutexGuard<'_, AppliedState>> {
+        let applied = self.applied.lock().unwrap();
+        // Keep this lock through all UI/audio effects: snooze cannot finish
+        // between validation and starting an old alert.
+        (self.snooze_generation.load(Ordering::SeqCst) == generation).then_some(applied)
+    }
+
+    fn snooze(&self, action: impl FnOnce(&mut AppliedState)) {
+        let mut applied = self.applied.lock().unwrap();
+        self.snooze_generation.fetch_add(1, Ordering::SeqCst);
+        action(&mut applied);
+        // Also discard GETs begun while the POST was still in flight.
+        self.snooze_generation.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 /// Breadcrumbs for "it ran but nothing appeared" reports — a windowed-subsystem
@@ -103,23 +150,28 @@ fn http_json(method: &str, path: &str, body: Option<&str>) -> Result<Value, Stri
 // Windows is muted there's no sound (we don't unmute).
 // ---------------------------------------------------------------------------
 
-static ALARM: &[u8] = include_bytes!("../assets/alarm.wav");
-static ALARM_ON: AtomicBool = AtomicBool::new(false);
+static ALARM_WAV: &[u8] = include_bytes!("../assets/alarm.wav");
+// Keep playback and its flag in the same critical section so a concurrent
+// stop cannot finish before an in-flight start actually begins playback.
+static ALARM: Mutex<bool> = Mutex::new(false);
 
 fn start_alarm() {
-    if ALARM_ON.swap(true, Ordering::SeqCst) {
+    let mut playing = ALARM.lock().unwrap();
+    if *playing {
         return;
     }
     #[cfg(windows)]
     unsafe {
         use windows::core::PCWSTR;
         use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_LOOP, SND_MEMORY};
-        let _ = PlaySoundW(PCWSTR(ALARM.as_ptr().cast()), None, SND_MEMORY | SND_ASYNC | SND_LOOP);
+        let _ = PlaySoundW(PCWSTR(ALARM_WAV.as_ptr().cast()), None, SND_MEMORY | SND_ASYNC | SND_LOOP);
     }
+    *playing = true;
 }
 
 fn stop_alarm() {
-    if !ALARM_ON.swap(false, Ordering::SeqCst) {
+    let mut playing = ALARM.lock().unwrap();
+    if !*playing {
         return;
     }
     #[cfg(windows)]
@@ -129,6 +181,7 @@ fn stop_alarm() {
         // A null sound name stops whatever this process is playing.
         let _ = PlaySoundW(PCWSTR::null(), None, SND_FLAGS(0));
     }
+    *playing = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,14 +247,22 @@ fn place_overlay(win: &WebviewWindow, t: Target) {
     let _ = win.set_size(t.size);
 }
 
-fn show_overlay(app: &AppHandle, level: &str, spo2: Option<i64>, name: &str, t: Target) {
-    let Some(win) = ensure_overlay(app) else { return };
-    let payload = json!({
-        "level": level,
-        "spo2": spo2,
-        "mode": if t.border { "border" } else { "fullscreen" },
-        "device_name": name,
+fn overlay_payload(state: &Value, dev: Option<&Value>, t: Target) -> Value {
+    let signal_lost = dev.map_or(state["signal_lost"].as_bool() == Some(true), |d| {
+        d["signal_lost"].as_bool() == Some(true)
     });
+    json!({
+        "level": state["active_level"],
+        "spo2": if signal_lost { None } else { dev.and_then(|d| d["spo2"].as_i64()) },
+        "mode": if t.border { "border" } else { "fullscreen" },
+        "device_name": dev.and_then(|d| d["account_name"].as_str()).unwrap_or(""),
+        "signal_lost": signal_lost,
+        "message": state["message"].as_str().unwrap_or(""),
+    })
+}
+
+fn show_overlay(app: &AppHandle, payload: Value, t: Target) {
+    let Some(win) = ensure_overlay(app) else { return };
     *app.state::<Shell>().overlay_payload.lock().unwrap() = payload.clone();
     place_overlay(&win, t);
     let _ = win.set_ignore_cursor_events(t.border);
@@ -212,13 +273,7 @@ fn show_overlay(app: &AppHandle, level: &str, spo2: Option<i64>, name: &str, t: 
     place_overlay(&win, t);
 }
 
-fn update_overlay_text(app: &AppHandle, level: &str, spo2: Option<i64>, name: &str, t: Target) {
-    let payload = json!({
-        "level": level,
-        "spo2": spo2,
-        "mode": if t.border { "border" } else { "fullscreen" },
-        "device_name": name,
-    });
+fn update_overlay_text(app: &AppHandle, payload: Value) {
     *app.state::<Shell>().overlay_payload.lock().unwrap() = payload.clone();
     let _ = app.emit_to("overlay", "overlay-state", payload);
 }
@@ -244,18 +299,30 @@ fn set_tooltip(app: &AppHandle, text: &str) {
 
 fn tooltip_for(state: &Value, dev: Option<&Value>) -> String {
     let active = state["active_level"].as_str().unwrap_or("none");
-    let spo2 = dev.and_then(|d| d["spo2"].as_i64());
-    let pct = spo2.map(|v| format!(" {v}%")).unwrap_or_default();
-    match active {
-        "red" => return format!("Owlet \u{2014} RED ALERT{pct}"),
-        "amber" => return format!("Owlet \u{2014} Low oxygen{pct}"),
-        _ => {}
-    }
     if state["snoozed"].as_bool() == Some(true) {
         return "Owlet \u{2014} alert snoozed".into();
     }
+    if let Some(message) = state["message"].as_str() {
+        return format!("Owlet \u{2014} {message}");
+    }
+    if active == "red" {
+        let pct = dev.and_then(|d| d["spo2"].as_i64()).map(|v| format!(" {v}%")).unwrap_or_default();
+        return format!("Owlet \u{2014} RED ALERT{pct}");
+    }
+    if state["signal_lost"].as_bool() == Some(true) {
+        return "Owlet \u{2014} Signal lost".into();
+    }
+    let spo2 = dev.and_then(|d| d["spo2"].as_i64());
+    let pct = spo2.map(|v| format!(" {v}%")).unwrap_or_default();
+    if active == "amber" {
+        return format!("Owlet \u{2014} Low oxygen{pct}");
+    }
     if state["collecting"].as_bool() == Some(false) {
-        return "Owlet Dashboard (viewing a remote server)".into();
+        return if state["remote_mode"].as_bool() == Some(true) {
+            "Owlet Dashboard (viewing a remote server)".into()
+        } else {
+            "Owlet Dashboard (No Owlet account linked)".into()
+        };
     }
     match dev {
         Some(d) if d["stale"].as_bool() == Some(true) => "Owlet \u{2014} no recent data".into(),
@@ -271,6 +338,7 @@ fn tooltip_for(state: &Value, dev: Option<&Value>) -> String {
 fn alert_loop(app: AppHandle) {
     let mut failures: u32 = 0;
     loop {
+        let generation = app.state::<Shell>().snooze_generation.load(Ordering::SeqCst);
         match http_json("GET", "/api/alert-state", None) {
             Ok(state) => {
                 if failures >= FAILS_BEFORE_GIVING_UP {
@@ -281,16 +349,19 @@ fn alert_loop(app: AppHandle) {
                     }
                 }
                 failures = 0;
-                apply_state(&app, &state);
+                apply_state(&app, &state, generation);
             }
             Err(err) => {
                 failures += 1;
                 if failures == FAILS_BEFORE_GIVING_UP {
                     log_line(&format!("alert-state unreachable: {err}"));
-                    hide_overlay(&app);
-                    stop_alarm();
-                    *app.state::<Shell>().applied.lock().unwrap() = "unreachable".into();
-                    set_tooltip(&app, "Owlet \u{2014} server not responding");
+                }
+                if failures >= FAILS_BEFORE_GIVING_UP {
+                    let shell = app.state::<Shell>();
+                    if let Some(mut applied) = shell.poll_state(generation) {
+                        let state = unreachable_state(&applied, Instant::now());
+                        apply_ui(&app, &state, &mut applied);
+                    };
                 }
             }
         }
@@ -298,45 +369,201 @@ fn alert_loop(app: AppHandle) {
     }
 }
 
-fn apply_state(app: &AppHandle, state: &Value) {
+fn unreachable_state(applied: &AppliedState, now: Instant) -> Value {
+    let snoozed = applied.snoozed_until.is_some_and(|until| now < until);
+    let recent = applied.last_seen.is_some_and(|seen| now.saturating_duration_since(seen) < SIGNAL_LOST_WINDOW);
+    let had_alert = recent && matches!(applied.level.as_str(), "amber" | "red");
+    json!({
+        "level": if had_alert { "amber" } else { "none" },
+        "active_level": if had_alert && !snoozed { "amber" } else { "none" },
+        "signal_lost": had_alert,
+        "snoozed": snoozed,
+        "message": "Dashboard server not responding",
+        "devices": [],
+    })
+}
+
+fn apply_state(app: &AppHandle, state: &Value, generation: u64) {
+    let shell = app.state::<Shell>();
+    let Some(mut applied) = shell.poll_state(generation) else { return };
+    applied.level = state["level"].as_str().unwrap_or("none").into();
+    applied.last_seen = Some(Instant::now());
+    applied.snoozed_until = if state["snoozed"].as_bool() == Some(true) {
+        Some(Instant::now() + Duration::from_secs(state["snooze_seconds_left"].as_u64().unwrap_or(0)))
+    } else {
+        None
+    };
+    apply_ui(app, state, &mut applied);
+}
+
+fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedState) {
     let active = state["active_level"].as_str().unwrap_or("none").to_string();
     let level = state["level"].as_str().unwrap_or("none");
     let devices = state["devices"].as_array().cloned().unwrap_or_default();
     // Show the device driving the alert, else the first device.
     let dev = devices
         .iter()
-        .find(|d| d["level"].as_str() == Some(level) && level != "none")
+        .find(|d| d["level"].as_str() == Some(level) && level != "none" && d["signal_lost"].as_bool() == Some(true))
+        .or_else(|| devices.iter().find(|d| d["level"].as_str() == Some(level) && level != "none"))
         .or_else(|| devices.first());
-    let spo2 = dev.and_then(|d| d["spo2"].as_i64());
-    let name = dev.and_then(|d| d["account_name"].as_str()).unwrap_or("").to_string();
     set_tooltip(app, &tooltip_for(state, dev));
 
-    let shell = app.state::<Shell>();
     if active == "amber" || active == "red" {
-        let Some(target) = pick_target(app) else { return };
-        let key = format!(
-            "{active}|{},{}|{}x{}|{}",
-            target.pos.x, target.pos.y, target.size.width, target.size.height, target.border
-        );
-        let changed = *shell.applied.lock().unwrap() != key;
-        if changed {
-            show_overlay(app, &active, spo2, &name, target);
-            *shell.applied.lock().unwrap() = key;
-        } else {
-            update_overlay_text(app, &active, spo2, &name, target);
-        }
         if active == "red" {
             start_alarm();
         } else {
             stop_alarm();
         }
+        let Some(target) = pick_target(app) else { return };
+        let key = format!(
+            "{active}|{},{}|{}x{}|{}",
+            target.pos.x, target.pos.y, target.size.width, target.size.height, target.border
+        );
+        let payload = overlay_payload(state, dev, target);
+        let changed = applied.key != key;
+        if changed {
+            show_overlay(app, payload, target);
+            applied.key = key;
+        } else {
+            update_overlay_text(app, payload);
+        }
     } else {
-        let changed = *shell.applied.lock().unwrap() != "none";
+        let changed = applied.key != "none";
         if changed {
             hide_overlay(app);
-            *shell.applied.lock().unwrap() = "none".into();
+            applied.key = "none".into();
         }
         stop_alarm();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{mpsc, Arc};
+
+    #[test]
+    fn tooltip_distinguishes_an_unlinked_account_from_remote_viewing() {
+        let mut state = json!({ "collecting": false, "remote_mode": false });
+        assert_eq!(tooltip_for(&state, None), "Owlet Dashboard (No Owlet account linked)");
+        state["remote_mode"] = json!(true);
+        assert_eq!(tooltip_for(&state, None), "Owlet Dashboard (viewing a remote server)");
+    }
+
+    #[test]
+    fn snooze_rejects_old_results_and_allows_the_next_poll_even_if_post_failed() {
+        let shell = Shell::default();
+        let generation = shell.snooze_generation.load(Ordering::SeqCst);
+        shell.applied.lock().unwrap().key = "red".into();
+        shell.snooze(|applied| applied.key.clear());
+        assert!(shell.poll_state(generation).is_none());
+        let generation = shell.snooze_generation.load(Ordering::SeqCst);
+        let mut applied = shell.poll_state(generation).unwrap();
+        assert!(applied.key.is_empty());
+        applied.key = "red".into();
+    }
+
+    #[test]
+    fn poll_started_during_snooze_post_is_also_rejected() {
+        let shell = Arc::new(Shell::default());
+        let (posting, during_post) = mpsc::channel();
+        let (started, poll_started) = mpsc::channel();
+        let poll_shell = shell.clone();
+        let poll = std::thread::spawn(move || {
+            during_post.recv().unwrap();
+            let generation = poll_shell.snooze_generation.load(Ordering::SeqCst);
+            started.send(()).unwrap();
+            poll_shell.poll_state(generation).is_some()
+        });
+        shell.snooze(|applied| {
+            applied.key.clear();
+            posting.send(()).unwrap();
+            poll_started.recv().unwrap();
+        });
+        assert!(!poll.join().unwrap());
+    }
+
+    #[test]
+    fn disconnection_after_an_alert_warns_in_amber_and_respects_snooze_expiry() {
+        let now = Instant::now();
+        for level in ["amber", "red"] {
+            let applied = AppliedState {
+                key: level.into(),
+                level: level.into(),
+                snoozed_until: Some(now + Duration::from_secs(15)),
+                last_seen: Some(now),
+            };
+            let state = unreachable_state(&applied, now);
+            assert_eq!(state["active_level"], "none");
+            assert_eq!(state["signal_lost"], true);
+            let state = unreachable_state(&applied, now + Duration::from_secs(15));
+            assert_eq!(state["active_level"], "amber");
+            assert_eq!(state["message"], "Dashboard server not responding");
+        }
+    }
+
+    #[test]
+    fn disconnection_warning_expires_after_the_signal_lost_window() {
+        let now = Instant::now();
+        let applied = AppliedState {
+            key: "red".into(),
+            level: "red".into(),
+            snoozed_until: None,
+            last_seen: Some(now),
+        };
+        let just_before = unreachable_state(&applied, now + SIGNAL_LOST_WINDOW - Duration::from_secs(1));
+        assert_eq!(just_before["active_level"], "amber");
+        let after = unreachable_state(&applied, now + SIGNAL_LOST_WINDOW);
+        assert_eq!(after["active_level"], "none");
+        assert_eq!(after["signal_lost"], false);
+        assert_eq!(after["message"], "Dashboard server not responding");
+    }
+
+    #[test]
+    fn disconnection_without_an_alert_does_not_start_one() {
+        let shell = Shell::default();
+        let state = unreachable_state(&shell.applied.lock().unwrap(), Instant::now());
+        assert_eq!(state["active_level"], "none");
+        assert_eq!(state["signal_lost"], false);
+    }
+
+    #[test]
+    fn signal_lost_payload_hides_held_vitals_and_names_server_disconnection() {
+        let target = Target {
+            pos: PhysicalPosition::new(0, 0),
+            size: PhysicalSize::new(1920, 1080),
+            border: true,
+        };
+        let state = json!({ "active_level": "amber", "signal_lost": true });
+        let dev = json!({ "signal_lost": true, "spo2": 80, "account_name": "Baby" });
+        let payload = overlay_payload(&state, Some(&dev), target);
+        assert_eq!(payload["signal_lost"], true);
+        assert!(payload["spo2"].is_null());
+        assert_eq!(tooltip_for(&state, Some(&dev)), "Owlet \u{2014} Signal lost");
+
+        let shell = Shell::default();
+        let mut applied = shell.applied.lock().unwrap();
+        applied.level = "red".into();
+        applied.last_seen = Some(Instant::now());
+        let state = unreachable_state(&applied, Instant::now());
+        let payload = overlay_payload(&state, None, target);
+        assert_eq!(payload["level"], "amber");
+        assert_eq!(payload["message"], "Dashboard server not responding");
+    }
+
+    #[test]
+    fn fresh_red_alert_is_not_masked_by_another_devices_signal_loss() {
+        let target = Target {
+            pos: PhysicalPosition::new(0, 0),
+            size: PhysicalSize::new(1920, 1080),
+            border: false,
+        };
+        let state = json!({ "active_level": "red", "signal_lost": true });
+        let dev = json!({ "signal_lost": false, "spo2": 80 });
+        let payload = overlay_payload(&state, Some(&dev), target);
+        assert_eq!(payload["signal_lost"], false);
+        assert_eq!(payload["spo2"], 80);
+        assert_eq!(tooltip_for(&state, Some(&dev)), "Owlet \u{2014} RED ALERT 80%");
     }
 }
 
@@ -381,15 +608,18 @@ fn do_toggle_widget(app: &AppHandle) {
 }
 
 fn do_snooze(app: &AppHandle) {
-    if let Err(err) = http_json("POST", "/api/alert/snooze", None) {
-        log_line(&format!("snooze failed: {err}"));
-    }
-    // Act locally now rather than waiting up to 2 s for the next poll, and
-    // force the alert thread to re-apply whatever the server says next (if the
-    // snooze didn't take, the alert comes straight back).
-    hide_overlay(app);
-    stop_alarm();
-    *app.state::<Shell>().applied.lock().unwrap() = String::new();
+    app.state::<Shell>().snooze(|applied| {
+        // Silence locally before doing any HTTP, including when the server is
+        // down. Preserve the previous level for an amber disconnection warning.
+        hide_overlay(app);
+        stop_alarm();
+        applied.key.clear();
+        applied.snoozed_until = Some(Instant::now() + Duration::from_secs(15));
+        if let Err(err) = http_json("POST", "/api/alert/snooze", None) {
+            log_line(&format!("snooze failed: {err}"));
+        }
+        // The next fresh poll always re-applies, even if the POST failed.
+    });
 }
 
 fn do_test_alert(level: &str) {
@@ -568,6 +798,11 @@ fn build_widget(app: &tauri::App) -> tauri::Result<WebviewWindow> {
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    // Debug-only fault injection for verifying the dashboard's exit fallback.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("OWLET_DEBUG_FAIL_TRAY").is_some() {
+        return Err(std::io::Error::other("forced tray creation failure").into());
+    }
     let widget_toggle = MenuItem::with_id(app, "tray_widget", "Hide widget", true, None::<&str>)?;
     let test = SubmenuBuilder::new(app, "Test alert")
         .text("test_amber", "Amber (20 s)")
@@ -659,11 +894,7 @@ fn main() {
             overlay_state
         ])
         .manage(ServerProcess(Mutex::new(None)))
-        .manage(Shell {
-            widget_toggle: Mutex::new(None),
-            overlay_payload: Mutex::new(json!({ "level": "none" })),
-            applied: Mutex::new("none".into()),
-        })
+        .manage(Shell::default())
         .on_menu_event(|app, event| handle_menu(app, event.id().as_ref()))
         .setup(|app| {
             #[cfg(windows)]
@@ -687,8 +918,9 @@ fn main() {
                     return Err(err.into());
                 }
             }
-            if let Err(err) = build_tray(app) {
-                log_line(&format!("tray creation failed: {err}"));
+            match build_tray(app) {
+                Ok(()) => app.state::<Shell>().tray_available.store(true, Ordering::SeqCst),
+                Err(err) => log_line(&format!("tray creation failed: {err}")),
             }
             if let Err(err) = build_widget(app) {
                 log_line(&format!("widget creation failed: {err}"));
@@ -701,11 +933,17 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing hides to the tray: collection, widget and alerts keep
-            // running. Quit lives in the tray menu (RunEvent::Exit kills the
-            // sidecar). This also catches Alt+F4 on the frameless widget.
+            // Without a tray, closing the dashboard must remain a way to quit.
+            // RunEvent::Exit stops the alarm and sidecar on either exit path.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                if window.label() == "main"
+                    && !window.state::<Shell>().tray_available.load(Ordering::SeqCst)
+                {
+                    window.app_handle().exit(0);
+                    return;
+                }
+                // Otherwise hide to the tray, including Alt+F4 on the widget.
                 let _ = window.hide();
                 if window.label() == "widget" {
                     sync_widget_toggle(window.app_handle());

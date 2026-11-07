@@ -132,6 +132,9 @@ def create_app(
     state: dict[str, object] = {"store": store}
     rollup_cache: dict[tuple, tuple[float, dict]] = {}
 
+    def is_remote_mode() -> bool:
+        return bool(settings.desktop_mode and _read_desktop_config(settings).get("backend"))
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await store.init()
@@ -146,7 +149,7 @@ def create_app(
         clients: list[OwletClient] = []
         # When the desktop app is pointed at a remote server it's a pure viewer —
         # a local collector here would just fight the remote for the Owlet token.
-        remote_mode = bool(settings.desktop_mode and _read_desktop_config(settings).get("backend"))
+        remote_mode = is_remote_mode()
         if start_poller and not remote_mode:
             accounts = await store.list_accounts()
             token_accounts = [
@@ -225,6 +228,17 @@ def create_app(
             if _share_path_is_authorized(request.url.path, settings.owlet_share_token):
                 return await call_next(request)
             return Response(status_code=404)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def desktop_origin_guard(request: Request, call_next):
+        # The shell sends no Origin. Browser/widget POSTs come from the local
+        # sidecar; other origins must never inherit desktop's implicit admin.
+        if settings.desktop_mode and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origins = request.headers.getlist("origin")
+            allowed = {"http://127.0.0.1:8877", "http://localhost:8877"}
+            if origins and (len(origins) != 1 or origins[0] not in allowed):
+                return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
         return await call_next(request)
 
     @app.get("/")
@@ -1036,11 +1050,14 @@ def create_app(
 
     @app.get("/api/alert-state")
     async def alert_state(user: dict = Depends(require_user)):
-        return ALERTS.state(await _scope(user, None), bool(state.get("pollers")), time.time())
+        return ALERTS.state(
+            user["id"], await _scope(user, None), bool(state.get("pollers")), time.time(),
+            remote_mode=is_remote_mode(),
+        )
 
     @app.post("/api/alert/snooze")
     async def alert_snooze(user: dict = Depends(require_user)):
-        until = ALERTS.snooze(await _scope(user, None), time.time())
+        until = ALERTS.snooze(user["id"], await _scope(user, None), time.time())
         return {
             "snoozed_until": alert_iso(until),
             "snooze_seconds": SNOOZE_SECONDS,
@@ -1049,8 +1066,11 @@ def create_app(
     @app.post("/api/alert/test")
     async def alert_test(body: AlertTestBody, user: dict = Depends(require_user)):
         now = time.time()
-        ALERTS.set_test(body.level, body.seconds, now)
-        return ALERTS.state(await _scope(user, None), bool(state.get("pollers")), now)
+        ALERTS.set_test(user["id"], body.level, body.seconds, now)
+        return ALERTS.state(
+            user["id"], await _scope(user, None), bool(state.get("pollers")), now,
+            remote_mode=is_remote_mode(),
+        )
 
     @app.get("/widget")
     async def widget_window(user: dict = Depends(require_user)):

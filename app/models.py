@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 class OwletReading(BaseModel):
     device_serial: str
     recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Alert deduplication cannot treat a local fallback time as an Owlet sample.
+    timestamp_synthesized: bool = Field(default=False, exclude=True)
     heart_rate: float | None = None
     oxygen_saturation: float | None = None
     battery: float | None = None
@@ -124,9 +126,8 @@ def normalize_reading(raw: dict[str, Any], device_serial: str) -> OwletReading:
                 return rtv[name]
         return None
 
-    recorded_at = _to_datetime(
-        _first_present(raw, ("last_updated", "lastUpdated", "timestamp", "data_updated_at"))
-    )
+    timestamp = _first_present(raw, ("last_updated", "lastUpdated", "timestamp", "data_updated_at"))
+    recorded_at = _to_datetime(timestamp)
     sleep_state = field("sleep_state", "SLEEP_STATE", "ss")
     sock_disconnected = raw_flag_active(raw, "sock_disconnected", "SOCK_DISCON_ALRT") or raw_alert_mask_has(raw, 16)
     sock_off = raw_flag_active(raw, "sock_off", "SOCK_OFF") or raw_alert_mask_has(raw, 64)
@@ -137,6 +138,7 @@ def normalize_reading(raw: dict[str, Any], device_serial: str) -> OwletReading:
     return OwletReading(
         device_serial=device_serial,
         recorded_at=recorded_at,
+        timestamp_synthesized=timestamp is None,
         heart_rate=_to_float(field("heart_rate", "HEART_RATE", "hr")),
         oxygen_saturation=_to_float(
             field("oxygen_saturation", "oxygen_level", "OXYGEN_LEVEL", "ox")

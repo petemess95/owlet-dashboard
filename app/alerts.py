@@ -7,6 +7,7 @@ state machine: every method takes ``now`` (epoch seconds) so tests control time.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -19,6 +20,9 @@ EXIT_READINGS = 2      # consecutive distinct readings needed to leave a level
 HYSTERESIS = 1         # to leave a level SpO2 must reach threshold + HYSTERESIS
 STALE_SECONDS = 60     # no new reading for this long -> device is stale
 SNOOZE_SECONDS = 15
+# A device that goes quiet mid-alert warns "signal lost" for this long after it
+# turns stale, then falls back to plain "no data" so the overlay can't run forever.
+SIGNAL_LOST_SECONDS = 600
 TEST_DEFAULT_SECONDS = 20
 TEST_MIN_SECONDS = 5
 TEST_MAX_SECONDS = 120
@@ -29,6 +33,7 @@ _RANK = {name: i for i, name in enumerate(LEVELS)}
 
 CRIT_FLAGS = ("CRIT_OX_ALRT", "critical_oxygen_alert")
 LOW_FLAGS = ("LOW_OX_ALRT", "low_oxygen_alert")
+logger = logging.getLogger(__name__)
 
 
 def _iso(ts: float | None) -> str | None:
@@ -70,7 +75,8 @@ class DeviceAlertTracker:
     _red_in: int = 0
     _amber_out: int = 0
     _red_out: int = 0
-    _last_recorded_at: datetime | None = field(default=None, repr=False)
+    _last_sample_key: tuple[Any, ...] | None = field(default=None, repr=False)
+    _warned_missing_timestamp: bool = field(default=False, repr=False)
 
     def _reset_streaks(self) -> None:
         self._amber_in = self._red_in = self._amber_out = self._red_out = 0
@@ -84,19 +90,35 @@ class DeviceAlertTracker:
         *,
         stale_after: float = STALE_SECONDS,
     ) -> None:
-        # 1. The poller fetches faster than Owlet updates: count each sample once.
-        if self._last_recorded_at is not None and reading.recorded_at == self._last_recorded_at:
-            return
-        self._last_recorded_at = reading.recorded_at
+        # 1. Count distinct samples once, but always process status/alarm flags:
+        # those properties can change without a new vitals timestamp.
+        raw = reading.raw or {}
+        crit_flag = raw_flag_active(raw, *CRIT_FLAGS)
+        low_flag = raw_flag_active(raw, *LOW_FLAGS)
+        if reading.timestamp_synthesized:
+            sample_key = ("vitals", reading.oxygen_saturation, reading.heart_rate,
+                          crit_flag, low_flag, reading.charging,
+                          reading.sock_off, reading.sock_disconnected)
+            if not self._warned_missing_timestamp:
+                logger.warning(
+                    "Missing Owlet timestamp for account_id=%s device=%s; deduplicating alert samples by vitals and flags",
+                    self.account_id, self.device_serial,
+                )
+                self._warned_missing_timestamp = True
+        else:
+            sample_key = ("timestamp", reading.recorded_at)
+        duplicate = sample_key == self._last_sample_key
         self.warn_threshold = warn
         self.critical_threshold = critical
         self.stale_after = stale_after
-        self.recorded_at = reading.recorded_at
-        self.last_new_reading_wall = now
+        if not duplicate:
+            self._last_sample_key = sample_key
+            self.recorded_at = reading.recorded_at
+            self.last_new_reading_wall = now
         self.heart_rate = reading.heart_rate if reading.heart_rate and reading.heart_rate > 0 else None
 
         # 2. Sock off / charging / disconnected never alerts.
-        if is_offline_reading(reading) or reading.oxygen_saturation is None:
+        if reading.charging or is_offline_reading(reading) or reading.oxygen_saturation is None:
             self.sock_reporting = False
             self.charging = bool(reading.charging)
             self.level = "none"
@@ -108,30 +130,34 @@ class DeviceAlertTracker:
 
         spo2 = float(reading.oxygen_saturation)
         self.spo2 = spo2
-        raw = reading.raw or {}
-        crit_flag = raw_flag_active(raw, *CRIT_FLAGS)
-        low_flag = raw_flag_active(raw, *LOW_FLAGS)
 
-        # 3. Streaks. A red reading also counts toward amber.
-        red_tier = spo2 < critical or crit_flag
-        amber_tier = red_tier or spo2 < warn or low_flag
-        self._red_in = self._red_in + 1 if red_tier else 0
-        self._amber_in = self._amber_in + 1 if amber_tier else 0
-        self._red_out = self._red_out + 1 if (spo2 >= critical + HYSTERESIS and not crit_flag) else 0
-        self._amber_out = self._amber_out + 1 if (spo2 >= warn + HYSTERESIS and not low_flag and not crit_flag) else 0
+        # 3. Streaks only advance on distinct readings. Red also counts as amber.
+        if not duplicate:
+            # Flags qualify immediately and must not count as threshold evidence.
+            red_tier = spo2 < critical
+            amber_tier = spo2 < warn
+            self._red_in = self._red_in + 1 if red_tier else 0
+            self._amber_in = self._amber_in + 1 if amber_tier else 0
+            self._red_out = self._red_out + 1 if (spo2 >= critical + HYSTERESIS and not crit_flag) else 0
+            self._amber_out = self._amber_out + 1 if (spo2 >= warn + HYSTERESIS and not low_flag and not crit_flag) else 0
 
-        # 4. Escalate. Owlet's own alarm flags are a backstop and act immediately.
-        if crit_flag and self.level != "red":
-            self.level, self.reason = "red", "owlet_flag"
+        # 4. Choose the highest qualifying target; a low flag must never delay red.
+        # Duplicate samples may escalate through flags, never through thresholds.
+        red_threshold = not duplicate and spo2 < critical and self._red_in >= ENTER_READINGS
+        amber_threshold = not duplicate and spo2 < warn and self._amber_in >= ENTER_READINGS
+        if crit_flag or red_threshold:
+            target = "red"
+            reason = "below_threshold" if red_threshold else "owlet_flag"
+        elif low_flag or amber_threshold:
+            target = "amber"
+            reason = "below_threshold" if amber_threshold else "owlet_flag"
+        else:
+            target, reason = "none", None
+        if _RANK[target] > _RANK[self.level]:
+            self.level, self.reason = target, reason
             return
-        if low_flag and self.level == "none":
-            self.level, self.reason = "amber", "owlet_flag"
-            return
-        if self._red_in >= ENTER_READINGS and self.level != "red":
-            self.level, self.reason = "red", "below_threshold"
-            return
-        if self._amber_in >= ENTER_READINGS and self.level == "none":
-            self.level, self.reason = "amber", "below_threshold"
+
+        if duplicate:
             return
 
         # 5. De-escalate. A reading exactly at the threshold holds the level.
@@ -144,28 +170,59 @@ class DeviceAlertTracker:
         elif self.level == "amber" and self._amber_out >= EXIT_READINGS:
             self.level, self.reason = "none", None
 
+        # A held level may now be supported by a different condition, or by none
+        # while hysteresis waits out the exit readings. Only the explanation
+        # changes here.
+        if self.level in ("amber", "red"):
+            red = self.level == "red"
+            flag = crit_flag if red else low_flag
+            threshold = red_threshold if red else amber_threshold
+            still_low = spo2 < (critical if red else warn)
+            if flag and not threshold:
+                self.reason = "owlet_flag"
+            elif threshold or still_low:
+                self.reason = "below_threshold"
+            else:
+                self.reason = "recovering"
+
     def is_stale(self, now: float) -> bool:
         return self.last_new_reading_wall is None or now - self.last_new_reading_wall > self.stale_after
 
+    def is_signal_lost(self, now: float) -> bool:
+        if self.level not in ("amber", "red") or self.last_new_reading_wall is None:
+            return False
+        silent = now - self.last_new_reading_wall
+        return self.stale_after < silent <= self.stale_after + SIGNAL_LOST_SECONDS
+
     def as_dict(self, now: float) -> dict[str, Any]:
         stale = self.is_stale(now)
+        signal_lost = self.is_signal_lost(now)
         age = None if self.last_new_reading_wall is None else max(0, int(now - self.last_new_reading_wall))
         return {
             "account_id": self.account_id,
             "account_name": self.account_name,
             "device_serial": self.device_serial,
-            "level": "none" if stale else self.level,
-            "reason": None if stale else self.reason,
+            "level": "amber" if signal_lost else "none" if stale else self.level,
+            "reason": "signal_lost" if signal_lost else None if stale else self.reason,
             "spo2": None if self.spo2 is None else round(self.spo2),
             "heart_rate": None if self.heart_rate is None else round(self.heart_rate),
             "recorded_at": _iso_dt(self.recorded_at),
             "age_seconds": age,
             "stale": stale,
+            "signal_lost": signal_lost,
             "sock_reporting": self.sock_reporting,
             "charging": self.charging,
             "warn_threshold": self.warn_threshold,
             "critical_threshold": self.critical_threshold,
         }
+
+
+@dataclass
+class _UserAlerts:
+    snoozed_until: float | None = None
+    snoozed_level: str | None = None
+    test_level: str | None = None
+    test_until: float | None = None
 
 
 class AlertMonitor:
@@ -174,10 +231,10 @@ class AlertMonitor:
 
     def reset(self) -> None:
         self.trackers: dict[tuple[int, str], DeviceAlertTracker] = {}
-        self.snoozed_until: float | None = None
-        self.snoozed_level: str | None = None
-        self.test_level: str | None = None
-        self.test_until: float | None = None
+        self.users: dict[int, _UserAlerts] = {}
+
+    def _user(self, user_id: int) -> _UserAlerts:
+        return self.users.setdefault(user_id, _UserAlerts())
 
     # ---- inputs -------------------------------------------------------------
     def observe(
@@ -198,83 +255,96 @@ class AlertMonitor:
         tracker.account_name = account_name
         tracker.observe(reading, warn, critical, now, stale_after=stale_after)
 
-    def set_test(self, level: str, seconds: int | None, now: float) -> None:
+    def forget_account(self, account_id: int) -> None:
+        """Drop an account's devices once its collector stops, so an alert that
+        was active at the time can't linger as a lost signal."""
+        for key in [k for k in self.trackers if k[0] == int(account_id)]:
+            del self.trackers[key]
+
+    def set_test(self, user_id: int, level: str, seconds: int | None, now: float) -> None:
+        user = self._user(user_id)
         if level == "none":
-            self.test_level = self.test_until = None
+            user.test_level = user.test_until = None
             return
         if level not in ("amber", "red"):
             raise ValueError(f"unknown level {level!r}")
         secs = TEST_DEFAULT_SECONDS if seconds is None else int(seconds)
         secs = max(TEST_MIN_SECONDS, min(TEST_MAX_SECONDS, secs))
-        self.test_level = level
-        self.test_until = now + secs
+        user.test_level = level
+        user.test_until = now + secs
 
-    def snooze(self, account_ids: list[int] | None, now: float) -> float | None:
-        level = self._level(account_ids, now)
+    def snooze(self, user_id: int, account_ids: list[int] | None, now: float) -> float | None:
+        level = _worst([d["level"] for d in self._devices(user_id, account_ids, now)])
         if level == "none":
             return None
-        self.snoozed_until = now + SNOOZE_SECONDS
-        self.snoozed_level = level
-        return self.snoozed_until
+        user = self._user(user_id)
+        user.snoozed_until = now + SNOOZE_SECONDS
+        user.snoozed_level = level
+        return user.snoozed_until
 
     # ---- outputs ------------------------------------------------------------
-    def _test_device(self, now: float) -> dict[str, Any] | None:
-        if self.test_level is None or self.test_until is None:
+    def _test_device(self, user_id: int, now: float) -> dict[str, Any] | None:
+        user = self._user(user_id)
+        if user.test_level is None or user.test_until is None:
             return None
-        if now >= self.test_until:
-            self.test_level = self.test_until = None
+        if now >= user.test_until:
+            user.test_level = user.test_until = None
             return None
         return {
             "account_id": 0,
             "account_name": "Test alert",
             "device_serial": TEST_SERIAL,
-            "level": self.test_level,
+            "level": user.test_level,
             "reason": "test",
-            "spo2": 84 if self.test_level == "red" else 88,
+            "spo2": 84 if user.test_level == "red" else 88,
             "heart_rate": 130,
             "recorded_at": _iso(now),
             "age_seconds": 0,
             "stale": False,
+            "signal_lost": False,
             "sock_reporting": True,
             "charging": False,
             "warn_threshold": 90,
             "critical_threshold": 86,
         }
 
-    def _devices(self, account_ids: list[int] | None, now: float) -> list[dict[str, Any]]:
+    def _devices(self, user_id: int, account_ids: list[int] | None, now: float) -> list[dict[str, Any]]:
         allowed = None if account_ids is None else {int(a) for a in account_ids}
         devices = [
             tracker.as_dict(now)
             for key, tracker in sorted(self.trackers.items())
             if allowed is None or key[0] in allowed
         ]
-        test = self._test_device(now)
+        test = self._test_device(user_id, now)
         if test is not None:
             devices.append(test)
         return devices
 
-    def _level(self, account_ids: list[int] | None, now: float) -> str:
-        return _worst([d["level"] for d in self._devices(account_ids, now) if not d["stale"]])
-
-    def state(self, account_ids: list[int] | None, collecting: bool, now: float) -> dict[str, Any]:
-        devices = self._devices(account_ids, now)
-        level = _worst([d["level"] for d in devices if not d["stale"]])
-        if self.snoozed_until is not None:
-            expired = now >= self.snoozed_until
-            escalated = _RANK[level] > _RANK[self.snoozed_level or "none"]
+    def state(
+        self, user_id: int, account_ids: list[int] | None, collecting: bool, now: float,
+        *, remote_mode: bool = False,
+    ) -> dict[str, Any]:
+        devices = self._devices(user_id, account_ids, now)
+        level = _worst([d["level"] for d in devices])
+        user = self._user(user_id)
+        if user.snoozed_until is not None:
+            expired = now >= user.snoozed_until
+            escalated = _RANK[level] > _RANK[user.snoozed_level or "none"]
             if expired or escalated or level == "none":
-                self.snoozed_until = self.snoozed_level = None
-        snoozed = self.snoozed_until is not None
+                user.snoozed_until = user.snoozed_level = None
+        snoozed = user.snoozed_until is not None
         return {
             "generated_at": _iso(now),
             "collecting": bool(collecting),
+            "remote_mode": bool(remote_mode),
             "level": level,
             "active_level": "none" if snoozed else level,
+            "signal_lost": any(d["signal_lost"] for d in devices),
             "snoozed": snoozed,
-            "snoozed_until": _iso(self.snoozed_until),
-            "snooze_seconds_left": max(0, int(round(self.snoozed_until - now))) if snoozed else 0,
+            "snoozed_until": _iso(user.snoozed_until),
+            "snooze_seconds_left": max(0, int(round(user.snoozed_until - now))) if snoozed else 0,
             "snooze_seconds": SNOOZE_SECONDS,
-            "test": self.test_level is not None,
+            "test": user.test_level is not None,
             "devices": devices,
         }
 

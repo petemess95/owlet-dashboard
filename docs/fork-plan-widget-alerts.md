@@ -102,7 +102,7 @@ Field meanings:
 - `collecting`: false when no poller is running, for example in remote mode.
 - `snoozed_until`: null when not snoozed.
 - `test`: true while a test alert from `/api/alert/test` is active.
-- `devices[].reason`: one of `below_threshold`, `owlet_flag`, `test`, or null.
+- `devices[].reason`: one of `below_threshold`, `owlet_flag`, `recovering` (level held while hysteresis waits out the exit readings), `signal_lost`, `test`, or null.
 - `devices[].spo2`: the last valid value, or null.
 - `devices[].sock_reporting`: false when the sock is off or disconnected.
 - `devices[]` is empty until the first reading arrives.

@@ -30,6 +30,7 @@ WIDGET_HTML = r"""<!doctype html>
     font-variant-numeric:tabular-nums; color:var(--ok); }
   .num small { font-size:18px; font-weight:500; color:var(--dim); margin-left:1px; }
   .num.amber { color:var(--amber); } .num.red { color:var(--red); } .num.none { color:var(--faint); }
+  .num.signal-lost { font-size:26px; color:var(--amber); }
   .hr { font-size:18px; color:var(--ink); font-variant-numeric:tabular-nums; }
   .hr small { font-size:12px; color:var(--dim); margin-left:2px; }
   .status { color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -69,6 +70,7 @@ WIDGET_HTML = r"""<!doctype html>
   var invoke = T && T.core && T.core.invoke;
   var $ = function (id) { return document.getElementById(id); };
   var last = null, lastAt = 0, failed = false;
+  var SIGNAL_LOST_SECONDS = 600;
 
   if (invoke) {
     $("ctrls").hidden = false;
@@ -82,8 +84,9 @@ WIDGET_HTML = r"""<!doctype html>
   }
 
   $("snooze").onclick = function () {
-    fetch("/api/alert/snooze", { method: "POST", credentials: "same-origin" })
-      .catch(function () {}).then(refresh);
+    var snooze = invoke ? invoke("snooze_alert") :
+      fetch("/api/alert/snooze", { method: "POST", credentials: "same-origin" });
+    snooze.catch(function () {}).then(refresh);
   };
 
   function tier(spo2, d) {
@@ -114,7 +117,17 @@ WIDGET_HTML = r"""<!doctype html>
   function render() {
     var frame = $("frame");
     if (failed) {
-      frame.className = "stale";
+      // Mirrors the shell: warn only if an alert was active within the last
+      // 10 minutes; otherwise the server is simply down.
+      var sinceLast = (Date.now() - lastAt) / 1000;
+      var wasAlerting = last && (last.level === "amber" || last.level === "red") &&
+        sinceLast < SIGNAL_LOST_SECONDS;
+      var snoozed = last && last.snoozed && sinceLast < last.snooze_seconds_left;
+      frame.className = wasAlerting && !snoozed ? "alert-amber" : "stale";
+      $("spo2").className = wasAlerting ? "num signal-lost" : "num";
+      $("spo2").textContent = wasAlerting ? "Signal lost" : "--";
+      $("hr").innerHTML = "--<small>bpm</small>";
+      $("extras").innerHTML = "";
       $("snooze").hidden = true;
       setStatus("Dashboard server not responding", true);
       return;
@@ -123,7 +136,8 @@ WIDGET_HTML = r"""<!doctype html>
     if (!s) return;
     var elapsed = Math.floor((Date.now() - lastAt) / 1000);
     var devs = s.devices || [];
-    var d = devs[0];
+    var d = devs.find(function (x) { return s.level !== "none" && x.level === s.level && x.signal_lost; }) ||
+      devs.find(function (x) { return s.level !== "none" && x.level === s.level; }) || devs[0];
     var active = s.active_level;
     frame.className = (active === "amber" || active === "red") ? "alert-" + active : "";
     var sn = $("snooze");
@@ -135,31 +149,35 @@ WIDGET_HTML = r"""<!doctype html>
       var spo2 = reporting ? d.spo2 : null;
       var hr = reporting ? d.heart_rate : null;
       var t = tier(spo2, d);
-      $("spo2").className = "num " + t;
-      $("spo2").innerHTML = (spo2 == null ? "--" : esc(spo2)) + "<small>%</small>";
+      $("spo2").className = d.signal_lost ? "num signal-lost" : "num " + t;
+      $("spo2").innerHTML = d.signal_lost ? "Signal lost" :
+        (spo2 == null ? "--" : esc(spo2)) + "<small>%</small>";
       $("hr").innerHTML = (hr == null ? "--" : esc(hr)) + "<small>bpm</small>";
-      if (d.stale) frame.className += " stale";
+      if (d.stale && !d.signal_lost) frame.className += " stale";
     } else {
       $("spo2").className = "num none";
       $("spo2").innerHTML = "--<small>%</small>";
       $("hr").innerHTML = "--<small>bpm</small>";
     }
 
-    if (!s.collecting && !s.test) setStatus("Alerts unavailable — viewing a remote server", true);
+    if (s.snoozed) setStatus("Snoozed " + Math.max(0, s.snooze_seconds_left - elapsed) + "s", false);
+    else if (d && d.signal_lost) setStatus("Signal lost — check sock connection", false);
+    else if (!s.collecting && !s.test) setStatus(s.remote_mode ?
+      "Alerts unavailable — viewing a remote server" : "No Owlet account linked", true);
     else if (!d) setStatus("Waiting for data", true);
     else if (d.stale) setStatus("No data for " + ago((d.age_seconds || 0) + elapsed), true);
     else if (!d.sock_reporting) setStatus(d.charging ? "Charging" : "Sock off", true);
-    else if (s.snoozed) setStatus("Snoozed " + Math.max(0, s.snooze_seconds_left - elapsed) + "s", false);
     else setStatus("Updated " + ago((d.age_seconds || 0) + elapsed) + " ago", false);
 
     var html = "";
-    for (var i = 1; i < devs.length; i++) {
+    for (var i = 0; i < devs.length; i++) {
       var x = devs[i];
+      if (x === d) continue;
       var xo = x.sock_reporting && !x.stale;
       var xt = xo ? tier(x.spo2, x) : "none";
       var col = xt === "red" ? "var(--red)" : xt === "amber" ? "var(--amber)" : xt === "ok" ? "var(--ok)" : "var(--faint)";
       html += '<div class="extra"><b>' + esc(x.account_name || x.device_serial) + "</b>" +
-        '<span style="color:' + col + '">' + (xo && x.spo2 != null ? esc(x.spo2) + "%" : (x.stale ? "no data" : "off")) + "</span>" +
+        '<span style="color:' + col + '">' + (x.signal_lost ? "Signal lost" : xo && x.spo2 != null ? esc(x.spo2) + "%" : (x.stale ? "no data" : "off")) + "</span>" +
         "<span>" + (xo && x.heart_rate != null ? esc(x.heart_rate) + " bpm" : "") + "</span></div>";
     }
     $("extras").innerHTML = html;

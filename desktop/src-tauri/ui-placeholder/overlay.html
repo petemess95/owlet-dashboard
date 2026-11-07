@@ -16,6 +16,9 @@
   #flash.border { pointer-events: none; box-sizing: border-box; border: 40px solid transparent; }
   #flash.border.lit { border-color: var(--c); }
   #flash.border .txt { display: none; }
+  #flash.border.signal-lost .txt { display: block; background: rgba(0,0,0,.8); padding: 8px; }
+  #flash.border.signal-lost .big { font-size: 6vh; }
+  #flash.border.signal-lost .snooze-hint { display: none; }
   .big { font-size: 14vh; font-weight: 800; line-height: 1; }
   .small { font-size: 3.2vh; margin-top: 2.5vh; font-weight: 600; }
 </style>
@@ -24,7 +27,7 @@
 <div id="flash">
   <div class="txt big" id="big"></div>
   <div class="txt small" id="who"></div>
-  <div class="txt small">Click anywhere to snooze 15 s</div>
+  <div class="txt small snooze-hint">Click anywhere to snooze 15 s</div>
 </div>
 <script>
 (function () {
@@ -35,20 +38,21 @@
   var state = null, lit = true;
 
   function apply(s) {
+    if (!state || !s || state.level !== s.level || state.mode !== s.mode) lit = true;
     state = s;
     if (!s || (s.level !== "amber" && s.level !== "red")) { el.className = ""; return; }
     var border = s.mode === "border";
     el.style.setProperty("--c", border ? BORDER[s.level] : COLORS[s.level]);
-    document.getElementById("big").textContent = s.spo2 != null ? "SpO₂ " + s.spo2 + "%" :
+    document.getElementById("big").textContent = s.signal_lost ? "Signal lost" : s.spo2 != null ? "SpO₂ " + s.spo2 + "%" :
       (s.level === "red" ? "RED ALERT" : "Low oxygen");
-    document.getElementById("who").textContent = s.device_name || "";
-    lit = true;
+    document.getElementById("who").textContent = s.message || s.device_name || "";
     paint();
   }
 
   function paint() {
     if (!state || (state.level !== "amber" && state.level !== "red")) return;
-    el.className = "on " + (state.mode === "border" ? "border" : "full") + (lit ? " lit" : "");
+    el.className = "on " + (state.mode === "border" ? "border" : "full") +
+      (state.signal_lost ? " signal-lost" : "") + (lit ? " lit" : "");
   }
 
   setInterval(function () { lit = !lit; paint(); }, 500);
