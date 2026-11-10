@@ -637,7 +637,7 @@ DEVICE_KEYS = {
 STATE_KEYS = {
     "generated_at", "collecting", "level", "active_level", "snoozed", "snoozed_until",
     "snooze_seconds_left", "snooze_seconds", "test", "devices", "signal_lost", "remote_mode",
-    "acknowledged", "acknowledged_until", "ack_seconds_left",
+    "acknowledged", "acknowledged_until", "ack_seconds_left", "awake_event_id",
 }
 
 
@@ -1031,3 +1031,206 @@ def test_preferences_api_awake_chime_round_trips_as_bool(app_bundle):
         for bad in (1, "true", None, [True]):
             assert patch(bad)["awake_chime"] is True
         assert patch(False)["awake_chime"] is False
+
+
+# ---- soft awake event ----------------------------------------------------------
+
+from app.alerts import AWAKE_MIN_INTERVAL_SECONDS  # noqa: E402
+
+
+def _sleep(m, i, state, spo2=97, chime=True, account=1, serial="AC1", **kw):
+    m.observe(account, "Baby", reading(i, spo2, sleep_state=state, serial=serial, **kw), 90, 86,
+              T0 + 10 * i, awake_chime=chime)
+
+
+def _awake_id(m, user=1, accounts=None, i=100):
+    return m.state(user, accounts, True, T0 + 10 * i)["awake_event_id"]
+
+
+@pytest.mark.parametrize("asleep", ["8", "15"])
+def test_asleep_to_awake_fires_one_event(asleep):
+    m = AlertMonitor()
+    _sleep(m, 0, asleep)
+    assert _awake_id(m, i=0) is None
+    _sleep(m, 1, "1")
+    first = _awake_id(m, i=1)
+    assert isinstance(first, int)
+    _sleep(m, 2, "1")
+    assert _awake_id(m, i=2) == first
+
+
+@pytest.mark.parametrize("chime", [False, None, "true", 1])
+def test_awake_chime_off_or_non_bool_never_fires(chime):
+    m = AlertMonitor()
+    _sleep(m, 0, "8", chime=chime)
+    _sleep(m, 1, "1", chime=chime)
+    assert _awake_id(m) is None
+    m2 = AlertMonitor()  # keyword missing entirely
+    m2.observe(1, "Baby", reading(0, 97, sleep_state="8"), 90, 86, T0)
+    m2.observe(1, "Baby", reading(1, 97, sleep_state="1"), 90, 86, T0 + 10)
+    assert _awake_id(m2) is None
+
+
+def test_second_transition_rate_limited_from_last_fired_event():
+    m = AlertMonitor()
+    _sleep(m, 0, "15")
+    _sleep(m, 1, "1")
+    first = _awake_id(m, i=1)
+    _sleep(m, 2, "8")
+    _sleep(m, 3, "1")  # 20 s later: dropped
+    assert _awake_id(m, i=3) == first
+    i = 1 + AWAKE_MIN_INTERVAL_SECONDS // 10
+    _sleep(m, i, "8")
+    _sleep(m, i + 1, "1")
+    second = _awake_id(m, i=i + 1)
+    assert second is not None and second > first
+
+
+def test_duplicate_sample_does_not_fire():
+    m = AlertMonitor()
+    _sleep(m, 0, "8")
+    # Same recorded_at with a changed sleep state is still a duplicate sample.
+    m.observe(1, "Baby", reading(0, 97, sleep_state="1"), 90, 86, T0 + 5, awake_chime=True)
+    assert _awake_id(m) is None
+
+
+@pytest.mark.parametrize("kw", [{"charging": True}, {"sock_off": True}])
+def test_charging_or_sock_off_does_not_fire(kw):
+    m = AlertMonitor()
+    _sleep(m, 0, "8")
+    _sleep(m, 1, "1", **kw)
+    assert _awake_id(m) is None
+    # The asleep state is not carried across the gap either.
+    _sleep(m, 2, "1")
+    assert _awake_id(m) is None
+
+
+def test_inactive_resets_and_none_neither_triggers_nor_resets():
+    m = AlertMonitor()
+    _sleep(m, 0, "8")
+    _sleep(m, 1, "0")
+    _sleep(m, 2, "1")
+    assert _awake_id(m) is None
+    _sleep(m, 3, None)
+    _sleep(m, 4, "1")
+    assert _awake_id(m) is None
+    _sleep(m, 5, "8")
+    _sleep(m, 6, None)
+    _sleep(m, 7, "1")
+    assert isinstance(_awake_id(m), int)
+
+
+def _red_sequence(chime):
+    m = AlertMonitor()
+    out = []
+    seq = [(97, "8"), (80, "1"), (80, "1"), (80, "8"), (97, "1"), (97, "1"), (97, "1")]
+    for i, (spo2, state) in enumerate(seq):
+        _sleep(m, i, state, spo2=spo2, chime=chime)
+        tr = m.trackers[(1, "AC1")]
+        s = m.state(1, None, True, T0 + 10 * i)
+        out.append((s, (tr._red_in, tr._amber_in, tr._red_out, tr._amber_out)))
+    return out
+
+
+def test_awake_event_cannot_mask_or_delay_oxygen_alert():
+    on = _red_sequence(True)
+    off = _red_sequence(False)
+    assert any(s["awake_event_id"] is not None for s, _ in on)
+    assert all(s["awake_event_id"] is None for s, _ in off)
+    for (s_on, streak_on), (s_off, streak_off) in zip(on, off, strict=True):
+        assert streak_on == streak_off
+        s_on, s_off = dict(s_on), dict(s_off)
+        s_on.pop("awake_event_id"), s_off.pop("awake_event_id")
+        assert s_on == s_off
+    # The transition sample (index 1) is below critical and counts toward red.
+    assert on[1][1][0] == 1 and on[2][0]["active_level"] == "red"
+
+
+def test_awake_event_never_sets_active_level_or_touches_snooze_or_ack():
+    m = AlertMonitor()
+    _sleep(m, 0, "8")
+    _sleep(m, 1, "1")
+    s = m.state(1, None, True, T0 + 10)
+    assert s["awake_event_id"] is not None
+    assert s["level"] == "none" and s["active_level"] == "none" and s["snoozed"] is False
+
+    m = AlertMonitor()
+    _sleep(m, 0, "8", spo2=80)
+    _sleep(m, 1, "8", spo2=80)
+    until = m.snooze(1, None, T0 + 11)
+    _sleep(m, 2, "1", spo2=80)
+    s = m.state(1, None, True, T0 + 21)
+    assert s["awake_event_id"] is not None and m.users[1].snoozed_until == until
+    ack_until = m.acknowledge(1, None, T0 + 22)
+    _sleep(m, 3, "8", spo2=80)
+    _sleep(m, 4 + AWAKE_MIN_INTERVAL_SECONDS // 10, "1", spo2=80)
+    s = m.state(1, None, True, T0 + 30)
+    assert m.users[1].ack_until() == ack_until and s["acknowledged"] is True
+    assert s["active_level"] == "none" and s["level"] == "red"
+
+
+def test_awake_failure_does_not_block_oxygen_logic(monkeypatch):
+    m = AlertMonitor()
+
+    def boom(*a, **kw):
+        raise RuntimeError("awake bug")
+
+    monkeypatch.setattr(DeviceAlertTracker, "awake_transition", boom)
+    _sleep(m, 0, "8", spo2=80)
+    _sleep(m, 1, "1", spo2=80)
+    s = m.state(1, None, True, T0 + 10)
+    assert s["active_level"] == "red" and s["awake_event_id"] is None
+
+
+def test_awake_event_scoped_to_account_and_forgotten():
+    m = AlertMonitor()
+    _sleep(m, 0, "8", account=1)
+    _sleep(m, 1, "1", account=1)
+    _sleep(m, 0, "8", account=2, serial="AC2")
+    assert _awake_id(m, user=2, accounts=[2]) is None
+    assert isinstance(_awake_id(m, user=1, accounts=[1]), int)
+    m.set_test(2, "red", 30, T0 + 10)
+    assert m.state(2, [2], True, T0 + 11)["awake_event_id"] is None
+    m.forget_account(1)
+    assert _awake_id(m, user=1, accounts=[1]) is None
+
+
+def test_api_awake_event_is_user_scoped(two_alert_users):
+    app, users = two_alert_users
+    (alice_token, alice_id), (bob_token, _) = users
+    now = time.time()
+    ALERTS.observe(alice_id, "alice", reading(10, 97, sleep_state="8"), 90, 86, now, awake_chime=True)
+    ALERTS.observe(alice_id, "alice", reading(11, 97, sleep_state="1"), 90, 86, now, awake_chime=True)
+    with client_for(app, alice_token) as client:
+        assert isinstance(client.get("/api/alert-state").json()["awake_event_id"], int)
+    with client_for(app, bob_token) as client:
+        assert client.get("/api/alert-state").json()["awake_event_id"] is None
+
+
+@pytest.mark.parametrize("prefs, expected", [
+    ({"awake_chime": True}, True), ({"awake_chime": False}, False), ({}, False),
+    ({"awake_chime": "true"}, False), ({"awake_chime": 1}, False),
+])
+def test_poller_passes_awake_chime(monkeypatch, prefs, expected):
+    seen = {}
+    real = ALERTS.observe
+
+    def spy(*a, **kw):
+        seen.update(kw)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(ALERTS, "observe", spy)
+    poller = Poller(_FakeStore(prefs), read_once=None, interval_seconds=5, account_id=7)  # type: ignore[arg-type]
+    asyncio.run(poller._feed_alerts(reading(0, 95)))
+    assert seen["awake_chime"] is expected
+
+
+def test_poller_awake_failure_still_alerts(monkeypatch):
+    def boom(*a, **kw):
+        raise RuntimeError("awake bug")
+
+    monkeypatch.setattr(DeviceAlertTracker, "awake_transition", boom)
+    poller = Poller(_FakeStore({"awake_chime": True}), read_once=None, interval_seconds=10, account_id=7)  # type: ignore[arg-type]
+    for i in range(2):
+        asyncio.run(poller._feed_alerts(reading(i, 80, sleep_state="1")))
+    assert ALERTS.state(1, [7], True, time.time())["active_level"] == "red"

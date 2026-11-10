@@ -36,6 +36,12 @@ TEST_MAX_SECONDS = 120
 ACK_GRACE_SECONDS = 180  # silence kept after recovery while acknowledged
 ACK_MAX_SECONDS = 600  # hard cap on an acknowledge, from when it was pressed
 TEST_SERIAL = "TEST"
+# Soft "awake" chime: at most one per device in this window, measured from the
+# last event that fired. It never touches the oxygen alert state.
+AWAKE_MIN_INTERVAL_SECONDS = 300
+ASLEEP_STATES = ("8", "15")
+AWAKE_STATE = "1"
+INACTIVE_STATE = "0"
 
 LEVELS = ("none", "amber", "red")
 _RANK = {name: i for i, name in enumerate(LEVELS)}
@@ -107,6 +113,11 @@ class DeviceAlertTracker:
     _red_out: int = 0
     _last_sample_key: tuple[Any, ...] | None = field(default=None, repr=False)
     _warned_missing_timestamp: bool = field(default=False, repr=False)
+    # Soft awake event (separate from the oxygen alert state above).
+    _last_observe_new: bool = field(default=False, repr=False)
+    _prev_sleep_state: str | None = field(default=None, repr=False)
+    awake_event_id: int | None = None
+    awake_event_at: float | None = None
 
     def _reset_streaks(self) -> None:
         self._amber_in = self._red_in = self._amber_out = self._red_out = 0
@@ -138,6 +149,7 @@ class DeviceAlertTracker:
         else:
             sample_key = ("timestamp", reading.recorded_at)
         duplicate = sample_key == self._last_sample_key
+        self._last_observe_new = not duplicate
         self.warn_threshold = warn
         self.critical_threshold = critical
         self.stale_after = stale_after
@@ -215,6 +227,29 @@ class DeviceAlertTracker:
             else:
                 self.reason = "recovering"
 
+    def awake_transition(self, reading: OwletReading) -> bool:
+        """Update the remembered sleep state for the sample just observed and
+        say whether it is an asleep -> awake transition. Call only after
+        observe(); reads (never writes) the oxygen-alert fields."""
+        if not self._last_observe_new:
+            return False
+        if not self.sock_reporting or self.charging:
+            self._prev_sleep_state = None
+            return False
+        state = reading.sleep_state
+        state = None if state is None else str(state)
+        if state in ASLEEP_STATES:
+            self._prev_sleep_state = state
+            return False
+        if state == INACTIVE_STATE:
+            self._prev_sleep_state = None
+            return False
+        if state == AWAKE_STATE:
+            was_asleep = self._prev_sleep_state in ASLEEP_STATES
+            self._prev_sleep_state = state
+            return was_asleep
+        return False  # unknown / None: neither triggers nor resets
+
     def is_stale(self, now: float) -> bool:
         return self.last_new_reading_wall is None or now - self.last_new_reading_wall > self.stale_after
 
@@ -276,6 +311,7 @@ class AlertMonitor:
     def reset(self) -> None:
         self.trackers: dict[tuple[int, str], DeviceAlertTracker] = {}
         self.users: dict[int, _UserAlerts] = {}
+        self._awake_counter = 0
 
     def _user(self, user_id: int) -> _UserAlerts:
         return self.users.setdefault(user_id, _UserAlerts())
@@ -291,6 +327,7 @@ class AlertMonitor:
         now: float,
         *,
         stale_after: float = STALE_SECONDS,
+        awake_chime: bool = False,
     ) -> None:
         key = (int(account_id), str(reading.device_serial))
         tracker = self.trackers.get(key)
@@ -298,6 +335,21 @@ class AlertMonitor:
             tracker = self.trackers[key] = DeviceAlertTracker(int(account_id), str(reading.device_serial))
         tracker.account_name = account_name
         tracker.observe(reading, warn, critical, now, stale_after=stale_after)
+        # The oxygen alert state for this sample is final; the awake chime runs
+        # afterwards and its failure can never undo or skip it.
+        try:
+            self._observe_awake(tracker, reading, now, awake_chime is True)
+        except Exception:
+            logger.exception("Awake event failed for account_id=%s; oxygen alerts unaffected", account_id)
+
+    def _observe_awake(self, tracker: DeviceAlertTracker, reading: OwletReading, now: float, enabled: bool) -> None:
+        if not tracker.awake_transition(reading) or not enabled:
+            return
+        if tracker.awake_event_at is not None and now - tracker.awake_event_at < AWAKE_MIN_INTERVAL_SECONDS:
+            return
+        self._awake_counter += 1
+        tracker.awake_event_id = self._awake_counter
+        tracker.awake_event_at = now
 
     def forget_account(self, account_id: int) -> None:
         """Drop an account's devices once its collector stops, so an alert that
@@ -412,6 +464,11 @@ class AlertMonitor:
     ) -> dict[str, Any]:
         devices = self._devices(user_id, account_ids, now)
         level = _worst([d["level"] for d in devices])
+        allowed = None if account_ids is None else {int(a) for a in account_ids}
+        awake_ids = [
+            t.awake_event_id for key, t in self.trackers.items()
+            if t.awake_event_id is not None and (allowed is None or key[0] in allowed)
+        ]
         user = self._user(user_id)
         self._update_ack(user, level, now)
         acknowledged = user.acknowledged_at is not None
@@ -440,6 +497,7 @@ class AlertMonitor:
             "ack_seconds_left": max(0, int(round(ack_until - now))) if ack_until is not None else 0,
             "test": user.test_level is not None,
             "devices": devices,
+            "awake_event_id": max(awake_ids, default=None),
         }
 
 

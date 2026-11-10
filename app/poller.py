@@ -153,6 +153,7 @@ class Poller:
             ALERTS.observe(
                 self.account_id, name, reading, warn, critical, time.time(),
                 stale_after=stale_after,
+                awake_chime=isinstance(prefs, dict) and prefs.get("awake_chime") is True,
             )
         except asyncio.CancelledError:
             raise
