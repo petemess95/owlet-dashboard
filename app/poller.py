@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.alerts import ALERTS, STALE_SECONDS
+from app.alerts import ALERTS, resolve_alert_timing
 from app.analytics import resolve_o2_thresholds
 from app.models import OwletReading
 from app.owlet_client import OwletClient
@@ -146,9 +146,10 @@ class Poller:
             account = await self.store.get_account(self.account_id)
             prefs = account.get("dashboard_preferences") or {}
             warn, critical = resolve_o2_thresholds(prefs)
+            _, stale_seconds = resolve_alert_timing(prefs)
             name = str(account.get("display_name") or account.get("email") or "Owlet account")
             # A slow poll interval mustn't make every device look stale.
-            stale_after = max(STALE_SECONDS, 2 * self.interval_seconds + 15)
+            stale_after = max(stale_seconds, 2 * self.interval_seconds + 15)
             ALERTS.observe(
                 self.account_id, name, reading, warn, critical, time.time(),
                 stale_after=stale_after,

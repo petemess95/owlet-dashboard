@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -16,7 +17,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from pydantic import BaseModel
 
 from app import auth_pages, widget_page
-from app.alerts import ALERTS, SNOOZE_SECONDS
+from app.alerts import (
+    ALERTS,
+    SNOOZE_MAX_SECONDS,
+    SNOOZE_MIN_SECONDS,
+    SNOOZE_SECONDS,
+    STALE_MAX_SECONDS,
+    STALE_MIN_SECONDS,
+    STALE_SECONDS,
+    clamp_setting_seconds,
+    resolve_alert_timing,
+)
 from app.alerts import _iso as alert_iso
 from app.analytics import (
     O2_THRESHOLD_MAX,
@@ -1048,28 +1059,50 @@ def create_app(
             store, hours=hours, device=device, account_ids=await _scope(user, account)
         )
 
+    async def _snooze_seconds_for(user: dict, ids: list[int]) -> int:
+        """The shortest configured snooze among the user's accounts in scope
+        (unset counts as the default). Any read error falls back to the default."""
+        try:
+            scoped = set(ids)
+            accounts = await store.list_accounts(user_id=user["id"])
+            values = [
+                resolve_alert_timing(a.get("dashboard_preferences"))[0]
+                for a in accounts
+                if int(a["id"]) in scoped
+            ]
+            return min(values, default=SNOOZE_SECONDS)
+        except Exception:
+            logger.exception("Could not read snooze preference; using default")
+            return SNOOZE_SECONDS
+
     @app.get("/api/alert-state")
     async def alert_state(user: dict = Depends(require_user)):
+        ids = await _scope(user, None)
         return ALERTS.state(
-            user["id"], await _scope(user, None), bool(state.get("pollers")), time.time(),
+            user["id"], ids, bool(state.get("pollers")), time.time(),
             remote_mode=is_remote_mode(),
+            snooze_seconds=await _snooze_seconds_for(user, ids),
         )
 
     @app.post("/api/alert/snooze")
     async def alert_snooze(user: dict = Depends(require_user)):
-        until = ALERTS.snooze(user["id"], await _scope(user, None), time.time())
+        ids = await _scope(user, None)
+        secs = await _snooze_seconds_for(user, ids)
+        until = ALERTS.snooze(user["id"], ids, time.time(), snooze_seconds=secs)
         return {
             "snoozed_until": alert_iso(until),
-            "snooze_seconds": SNOOZE_SECONDS,
+            "snooze_seconds": secs,
         }
 
     @app.post("/api/alert/test")
     async def alert_test(body: AlertTestBody, user: dict = Depends(require_user)):
         now = time.time()
         ALERTS.set_test(user["id"], body.level, body.seconds, now)
+        ids = await _scope(user, None)
         return ALERTS.state(
-            user["id"], await _scope(user, None), bool(state.get("pollers")), now,
+            user["id"], ids, bool(state.get("pollers")), now,
             remote_mode=is_remote_mode(),
+            snooze_seconds=await _snooze_seconds_for(user, ids),
         )
 
     @app.get("/widget")
@@ -1196,6 +1229,22 @@ def _public_dashboard_preferences_patch(value: object) -> dict[str, object] | No
                 and O2_THRESHOLD_MIN <= int(raw_bound) <= O2_THRESHOLD_MAX
             ):
                 allowed[key] = int(raw_bound)
+    for key, default, low, high in (
+        ("alert_snooze_seconds", SNOOZE_SECONDS, SNOOZE_MIN_SECONDS, SNOOZE_MAX_SECONDS),
+        ("alert_stale_seconds", STALE_SECONDS, STALE_MIN_SECONDS, STALE_MAX_SECONDS),
+    ):
+        if key in value:
+            raw_seconds = value.get(key)
+            if raw_seconds in (None, "") and not isinstance(raw_seconds, bool):
+                allowed[key] = None
+            elif (
+                isinstance(raw_seconds, (int, float))
+                and not isinstance(raw_seconds, bool)
+                and math.isfinite(raw_seconds)
+            ):
+                allowed[key] = clamp_setting_seconds(raw_seconds, default, low, high)
+    if isinstance(value.get("awake_chime"), bool):
+        allowed["awake_chime"] = bool(value.get("awake_chime"))
     for key in ("night_start", "night_end"):
         if key in value:
             clock = _valid_clock(value.get(key))

@@ -8,6 +8,7 @@ state machine: every method takes ``now`` (epoch seconds) so tests control time.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -23,6 +24,12 @@ SNOOZE_SECONDS = 15
 # A device that goes quiet mid-alert warns "signal lost" for this long after it
 # turns stale, then falls back to plain "no data" so the overlay can't run forever.
 SIGNAL_LOST_SECONDS = 600
+# Per-account overrides (dashboard_preferences) are clamped into these ranges on
+# write and again on read, so a bad stored value can never disable an alert.
+SNOOZE_MIN_SECONDS = 5
+SNOOZE_MAX_SECONDS = 120
+STALE_MIN_SECONDS = 30
+STALE_MAX_SECONDS = 300
 TEST_DEFAULT_SECONDS = 20
 TEST_MIN_SECONDS = 5
 TEST_MAX_SECONDS = 120
@@ -48,6 +55,27 @@ def _iso_dt(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def clamp_setting_seconds(value: object, default: int, low: int, high: int) -> int:
+    """A finite number (not a bool) clamped into [low, high]; anything else -> default."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    if not math.isfinite(value):
+        return default
+    return max(low, min(high, int(value)))
+
+
+def resolve_alert_timing(preferences: object) -> tuple[int, int]:
+    """(snooze_seconds, stale_seconds) for one account's dashboard_preferences."""
+    prefs = preferences if isinstance(preferences, dict) else {}
+    snooze = clamp_setting_seconds(
+        prefs.get("alert_snooze_seconds"), SNOOZE_SECONDS, SNOOZE_MIN_SECONDS, SNOOZE_MAX_SECONDS
+    )
+    stale = clamp_setting_seconds(
+        prefs.get("alert_stale_seconds"), STALE_SECONDS, STALE_MIN_SECONDS, STALE_MAX_SECONDS
+    )
+    return snooze, stale
 
 
 def _worst(levels: list[str]) -> str:
@@ -273,12 +301,16 @@ class AlertMonitor:
         user.test_level = level
         user.test_until = now + secs
 
-    def snooze(self, user_id: int, account_ids: list[int] | None, now: float) -> float | None:
+    def snooze(
+        self, user_id: int, account_ids: list[int] | None, now: float,
+        *, snooze_seconds: int = SNOOZE_SECONDS,
+    ) -> float | None:
+        secs = clamp_setting_seconds(snooze_seconds, SNOOZE_SECONDS, SNOOZE_MIN_SECONDS, SNOOZE_MAX_SECONDS)
         level = _worst([d["level"] for d in self._devices(user_id, account_ids, now)])
         if level == "none":
             return None
         user = self._user(user_id)
-        user.snoozed_until = now + SNOOZE_SECONDS
+        user.snoozed_until = now + secs
         user.snoozed_level = level
         return user.snoozed_until
 
@@ -322,7 +354,7 @@ class AlertMonitor:
 
     def state(
         self, user_id: int, account_ids: list[int] | None, collecting: bool, now: float,
-        *, remote_mode: bool = False,
+        *, remote_mode: bool = False, snooze_seconds: int = SNOOZE_SECONDS,
     ) -> dict[str, Any]:
         devices = self._devices(user_id, account_ids, now)
         level = _worst([d["level"] for d in devices])
@@ -343,7 +375,9 @@ class AlertMonitor:
             "snoozed": snoozed,
             "snoozed_until": _iso(user.snoozed_until),
             "snooze_seconds_left": max(0, int(round(user.snoozed_until - now))) if snoozed else 0,
-            "snooze_seconds": SNOOZE_SECONDS,
+            "snooze_seconds": clamp_setting_seconds(
+                snooze_seconds, SNOOZE_SECONDS, SNOOZE_MIN_SECONDS, SNOOZE_MAX_SECONDS
+            ),
             "test": user.test_level is not None,
             "devices": devices,
         }

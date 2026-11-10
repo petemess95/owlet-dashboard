@@ -668,3 +668,188 @@ def test_hosted_origin_behavior_is_unchanged(two_alert_users):
     with client_for(app, token) as client:
         assert client.post("/api/alert/snooze", headers={"Origin": "https://hosted.example"}).status_code == 200
         assert client.get("/api/alert-state").json()["snoozed"] is True
+
+
+# ---- per-account snooze / stale settings -------------------------------------
+
+from app.alerts import resolve_alert_timing  # noqa: E402
+
+
+@pytest.mark.parametrize("prefs, expected", [
+    (None, (15, 60)),
+    ({}, (15, 60)),
+    ("garbage", (15, 60)),
+    ({"alert_snooze_seconds": None, "alert_stale_seconds": None}, (15, 60)),
+    ({"alert_snooze_seconds": 30, "alert_stale_seconds": 120}, (30, 120)),
+    ({"alert_snooze_seconds": 0, "alert_stale_seconds": 0}, (5, 30)),
+    ({"alert_snooze_seconds": -10, "alert_stale_seconds": 1}, (5, 30)),
+    ({"alert_snooze_seconds": 3600, "alert_stale_seconds": 99999}, (120, 300)),
+    ({"alert_snooze_seconds": "3600", "alert_stale_seconds": "5"}, (15, 60)),
+    ({"alert_snooze_seconds": True, "alert_stale_seconds": False}, (15, 60)),
+    ({"alert_snooze_seconds": [30], "alert_stale_seconds": {"x": 1}}, (15, 60)),
+    ({"alert_snooze_seconds": float("inf"), "alert_stale_seconds": float("nan")}, (15, 60)),
+    ({"alert_snooze_seconds": 29.9, "alert_stale_seconds": 45.5}, (29, 45)),
+])
+def test_resolve_alert_timing_defaults_and_clamps_stored_values(prefs, expected):
+    assert resolve_alert_timing(prefs) == expected
+
+
+def test_snooze_with_configured_length_lasts_exactly_that_long():
+    m = _red_monitor()
+    now = T0 + 11
+    assert m.snooze(1, [1], now, snooze_seconds=30) == now + 30
+    s = m.state(1, [1], True, now + 29, snooze_seconds=30)
+    assert s["snoozed"] is True and s["snooze_seconds"] == 30
+    s = m.state(1, [1], True, now + 30, snooze_seconds=30)
+    assert s["snoozed"] is False and s["active_level"] == "red"
+
+
+def test_engine_clamps_snooze_argument():
+    m = _red_monitor()
+    now = T0 + 11
+    assert m.snooze(1, [1], now, snooze_seconds=0) == now + 5
+    assert m.snooze(1, [1], now, snooze_seconds=10_000) == now + 120
+
+
+def test_configured_snooze_still_cancelled_by_escalation():
+    m = AlertMonitor()
+    for i, v in enumerate([88, 88]):
+        m.observe(1, "Baby", reading(i, v), 90, 86, T0 + i)
+    m.snooze(1, [1], T0 + 2, snooze_seconds=120)
+    for i, v in enumerate([80, 80], start=3):
+        m.observe(1, "Baby", reading(i, v), 90, 86, T0 + i)
+    s = m.state(1, [1], True, T0 + 5, snooze_seconds=120)
+    assert s["active_level"] == "red" and s["snoozed"] is False
+
+
+@pytest.mark.parametrize("interval, configured, not_stale_at, stale_at", [
+    (5, 120, 90, 121),      # configured value replaces the 60 s default
+    (5, None, 59, 61),      # default 60
+    (60, 30, 130, 136),     # floor 2*60+15 = 135 beats configured 30
+    (5, 9999, 299, 301),    # stored garbage clamped to 300
+])
+def test_per_account_stale_timeout(interval, configured, not_stale_at, stale_at):
+    poller = Poller(_FakeStore({"alert_stale_seconds": configured}),
+                    read_once=None, interval_seconds=interval, account_id=7)  # type: ignore[arg-type]
+    asyncio.run(poller._feed_alerts(reading(0, 97)))
+    tracker = ALERTS.trackers[(7, "AC1")]
+    start = tracker.last_new_reading_wall
+    assert not tracker.is_stale(start + not_stale_at)
+    assert tracker.is_stale(start + stale_at)
+
+
+def _user_with_accounts(app_bundle, prefs_list):
+    app, store, auth_store = app_bundle
+
+    async def setup():
+        await store.init()
+        await auth_store.init()
+        user, token = await make_user(auth_store, "parent@example.com")
+        ids = []
+        for i, prefs in enumerate(prefs_list):
+            account = await store.create_account(email=f"o{i}@example.com", user_id=user["id"])
+            if prefs:
+                await store.update_account_preferences(int(account["id"]), dashboard_preferences=prefs)
+            ids.append(int(account["id"]))
+        return token, ids
+
+    token, ids = asyncio.run(setup())
+    return app, token, ids
+
+
+def _make_red(account_id):
+    now = time.time()
+    for i in range(2):
+        ALERTS.observe(account_id, "Baby", reading(i, 80), 90, 86, now)
+
+
+def _epoch(iso: str) -> float:
+    return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+
+
+@pytest.mark.parametrize("prefs_list, expected", [
+    ([{"alert_snooze_seconds": 30}], 30),
+    ([{"alert_snooze_seconds": 20}, {"alert_snooze_seconds": 60}], 20),
+    ([{}, {"alert_snooze_seconds": 60}], 15),
+])
+def test_api_snooze_uses_shortest_configured_length(app_bundle, prefs_list, expected):
+    app, token, ids = _user_with_accounts(app_bundle, prefs_list)
+    with client_for(app, token) as client:
+        assert client.get("/api/alert-state").json()["snooze_seconds"] == expected
+        _make_red(ids[-1])
+        before = time.time()
+        snooze = client.post("/api/alert/snooze").json()
+        assert snooze["snooze_seconds"] == expected
+        until = _epoch(snooze["snoozed_until"])
+        assert before + expected - 2 <= until <= before + expected + 1
+        s = client.get("/api/alert-state").json()
+        assert set(s) == STATE_KEYS and s["snoozed"] is True and s["snooze_seconds"] == expected
+        test_state = client.post("/api/alert/test", json={"level": "amber"}).json()
+        assert test_state["snooze_seconds"] == expected
+
+
+def test_api_snooze_with_no_accounts_uses_default(app_bundle):
+    app, token, _ = _user_with_accounts(app_bundle, [])
+    with client_for(app, token) as client:
+        assert client.get("/api/alert-state").json()["snooze_seconds"] == 15
+        assert client.post("/api/alert/snooze").json()["snooze_seconds"] == 15
+
+
+def test_changing_setting_does_not_alter_running_snooze(app_bundle):
+    app, token, ids = _user_with_accounts(app_bundle, [{"alert_snooze_seconds": 60}])
+    with client_for(app, token) as client:
+        _make_red(ids[0])
+        until = client.post("/api/alert/snooze").json()["snoozed_until"]
+        client.patch(f"/api/accounts/{ids[0]}", json={"dashboard_preferences": {"alert_snooze_seconds": 5}})
+        s = client.get("/api/alert-state").json()
+        assert s["snoozed_until"] == until and s["snooze_seconds"] == 5
+
+
+@pytest.mark.parametrize("key, sent, stored", [
+    ("alert_snooze_seconds", 1, 5),
+    ("alert_snooze_seconds", 500, 120),
+    ("alert_snooze_seconds", 45, 45),
+    ("alert_snooze_seconds", 30.7, 30),
+    ("alert_stale_seconds", 5, 30),
+    ("alert_stale_seconds", 1000, 300),
+    ("alert_stale_seconds", 90, 90),
+])
+def test_preferences_api_clamps_alert_seconds(app_bundle, key, sent, stored):
+    app, token, ids = _user_with_accounts(app_bundle, [{}])
+    with client_for(app, token) as client:
+        r = client.patch(f"/api/accounts/{ids[0]}", json={"dashboard_preferences": {key: sent}})
+        assert r.status_code == 200
+        assert r.json()["account"]["dashboard_preferences"][key] == stored
+
+
+@pytest.mark.parametrize("key", ["alert_snooze_seconds", "alert_stale_seconds"])
+def test_preferences_api_ignores_bad_types_and_none_resets(app_bundle, key):
+    app, token, ids = _user_with_accounts(app_bundle, [{}])
+    url = f"/api/accounts/{ids[0]}"
+
+    def patch(v):
+        r = client.patch(url, json={"dashboard_preferences": {key: v}})
+        assert r.status_code == 200
+        return r.json()["account"]["dashboard_preferences"]
+
+    with client_for(app, token) as client:
+        patch(90)
+        for bad in (True, False, "60", "abc", [60], {"v": 60}):
+            assert patch(bad)[key] == 90
+        for reset in (None, ""):
+            patch(90)
+            assert patch(reset).get(key) is None
+
+
+def test_preferences_api_awake_chime_round_trips_as_bool(app_bundle):
+    app, token, ids = _user_with_accounts(app_bundle, [{}])
+    url = f"/api/accounts/{ids[0]}"
+
+    def patch(v):
+        return client.patch(url, json={"dashboard_preferences": {"awake_chime": v}}).json()["account"]["dashboard_preferences"]
+
+    with client_for(app, token) as client:
+        assert patch(True)["awake_chime"] is True
+        for bad in (1, "true", None, [True]):
+            assert patch(bad)["awake_chime"] is True
+        assert patch(False)["awake_chime"] is False
