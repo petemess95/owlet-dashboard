@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.alerts import ALERTS, SIGNAL_LOST_SECONDS, AlertMonitor, DeviceAlertTracker
+from app.alerts import ACK_GRACE_SECONDS, ACK_MAX_SECONDS, ALERTS, SIGNAL_LOST_SECONDS, AlertMonitor, DeviceAlertTracker
 from app.models import OwletReading, normalize_reading
 from app.poller import Poller
 from tests.conftest import client_for, make_user
@@ -415,6 +415,142 @@ def test_snooze_cancelled_when_amber_escalates_to_red():
     assert s["active_level"] == "red" and s["snoozed"] is False
 
 
+# ---- monitor: acknowledge ("I'm checking") -----------------------------------
+
+def test_acknowledge_silences_but_reports_real_level():
+    m = _red_monitor()
+    now = T0 + 10
+    assert m.acknowledge(1, [1], now) == now + ACK_MAX_SECONDS
+    s = m.state(1, [1], True, now + 1)
+    assert s["level"] == "red" and s["active_level"] == "none"
+    assert s["acknowledged"] is True and s["acknowledged_until"].endswith("Z")
+    assert s["devices"][0]["level"] == "red" and s["devices"][0]["spo2"] == 80
+    assert s["ack_seconds_left"] == ACK_MAX_SECONDS - 1
+    assert m.state(1, [1], True, now + 100)["ack_seconds_left"] == ACK_MAX_SECONDS - 100
+
+
+def test_acknowledge_is_noop_when_nothing_alerting():
+    m = AlertMonitor()
+    m.observe(1, "Baby", reading(0, 97), 90, 86, T0)
+    assert m.acknowledge(1, [1], T0) is None
+    s = m.state(1, [1], True, T0)
+    assert s["acknowledged"] is False and s["acknowledged_until"] is None and s["ack_seconds_left"] == 0
+
+
+def test_acknowledge_grace_after_recovery_then_ends():
+    m = AlertMonitor()
+    m.set_test(1, "amber", 120, T0)
+    m.acknowledge(1, None, T0)
+    m.set_test(1, "none", None, T0 + 60)
+    s = m.state(1, None, True, T0 + 60)  # recovery seen here
+    assert s["acknowledged"] is True and s["ack_seconds_left"] == ACK_GRACE_SECONDS
+    # A new amber inside the grace stays silent; the grace restarts on the next recovery.
+    m.set_test(1, "amber", 120, T0 + 100)
+    s = m.state(1, None, True, T0 + 100)
+    assert s["active_level"] == "none" and s["acknowledged"] is True
+    assert s["ack_seconds_left"] == ACK_MAX_SECONDS - 100
+    m.set_test(1, "none", None, T0 + 150)
+    assert m.state(1, None, True, T0 + 150)["ack_seconds_left"] == ACK_GRACE_SECONDS
+    assert m.state(1, None, True, T0 + 150 + ACK_GRACE_SECONDS - 1)["acknowledged"] is True
+    s = m.state(1, None, True, T0 + 150 + ACK_GRACE_SECONDS)
+    assert s["acknowledged"] is False and s["acknowledged_until"] is None
+    # A new alert after the acknowledge ended fires normally.
+    m.set_test(1, "amber", 120, T0 + 400)
+    s = m.state(1, None, True, T0 + 400)
+    assert s["active_level"] == "amber" and s["acknowledged"] is False
+
+
+def test_acknowledge_cap_ends_it_and_alert_returns():
+    m = AlertMonitor()
+    m.set_test(1, "red", 120, T0)
+    m.acknowledge(1, None, T0)
+    for t in range(60, ACK_MAX_SECONDS, 60):
+        m.set_test(1, "red", 120, T0 + t)  # never recovers
+        assert m.state(1, None, True, T0 + t)["active_level"] == "none"
+    m.set_test(1, "red", 120, T0 + ACK_MAX_SECONDS)
+    s = m.state(1, None, True, T0 + ACK_MAX_SECONDS)
+    assert s["acknowledged"] is False and s["active_level"] == "red"
+
+
+def test_acknowledge_late_recovery_grace_never_passes_cap():
+    m = AlertMonitor()
+    m.set_test(1, "amber", 120, T0 + 500)
+    m.acknowledge(1, None, T0 + 500)
+    for t in range(560, 1050, 60):
+        m.set_test(1, "amber", 120, T0 + t)
+        assert m.state(1, None, True, T0 + t)["acknowledged"] is True
+    m.set_test(1, "none", None, T0 + 1050)
+    s = m.state(1, None, True, T0 + 1050)
+    assert s["acknowledged"] is True and s["ack_seconds_left"] == 50
+    assert m.state(1, None, True, T0 + 1100)["acknowledged"] is False
+
+
+def test_acknowledge_escalation_breaks_through():
+    m = AlertMonitor()
+    m.set_test(1, "amber", 120, T0)
+    m.acknowledge(1, None, T0)
+    m.set_test(1, "red", 120, T0 + 30)
+    s = m.state(1, None, True, T0 + 30)
+    assert s["active_level"] == "red" and s["acknowledged"] is False
+
+
+def test_acknowledge_escalation_breaks_through_during_grace():
+    m = AlertMonitor()
+    m.set_test(1, "amber", 120, T0)
+    m.acknowledge(1, None, T0)
+    m.set_test(1, "none", None, T0 + 30)
+    assert m.state(1, None, True, T0 + 30)["acknowledged"] is True
+    m.set_test(1, "red", 120, T0 + 60)
+    s = m.state(1, None, True, T0 + 60)
+    assert s["active_level"] == "red" and s["acknowledged"] is False
+
+
+def test_acknowledge_escalation_on_real_device():
+    m = AlertMonitor()
+    for i, v in enumerate([88, 88]):
+        m.observe(1, "Baby", reading(i, v), 90, 86, T0 + 10 * i)
+    m.acknowledge(1, [1], T0 + 10)
+    assert m.state(1, [1], True, T0 + 11)["active_level"] == "none"
+    for i, v in enumerate([84, 84], start=2):
+        m.observe(1, "Baby", reading(i, v), 90, 86, T0 + 10 * i)
+    s = m.state(1, [1], True, T0 + 31)
+    assert s["active_level"] == "red" and s["acknowledged"] is False
+
+
+def test_acknowledge_clears_snooze_and_snooze_does_not_shorten_it():
+    m = AlertMonitor()
+    m.set_test(1, "red", 120, T0)
+    m.snooze(1, None, T0)
+    m.acknowledge(1, None, T0 + 1)
+    s = m.state(1, None, True, T0 + 2)
+    assert s["snoozed"] is False and s["acknowledged"] is True
+    assert m.snooze(1, None, T0 + 5) == T0 + 20
+    m.set_test(1, "red", 120, T0 + 100)
+    s = m.state(1, None, True, T0 + 100)
+    assert s["acknowledged"] is True and s["active_level"] == "none"
+    assert s["ack_seconds_left"] == ACK_MAX_SECONDS + 1 - 100
+
+
+def test_snooze_under_acknowledge_never_outlasts_it():
+    m = AlertMonitor()
+    m.set_test(1, "red", 120, T0)
+    m.acknowledge(1, None, T0)
+    m.set_test(1, "red", 120, T0 + 590)
+    assert m.snooze(1, None, T0 + 590) == T0 + ACK_MAX_SECONDS
+    m.set_test(1, "red", 120, T0 + ACK_MAX_SECONDS)
+    s = m.state(1, None, True, T0 + ACK_MAX_SECONDS)
+    assert s["active_level"] == "red" and s["snoozed"] is False and s["acknowledged"] is False
+
+
+def test_acknowledge_is_per_user():
+    m = AlertMonitor()
+    m.set_test(1, "red", 120, T0)
+    m.set_test(2, "red", 120, T0)
+    m.acknowledge(1, None, T0)
+    assert m.state(2, None, True, T0 + 1)["active_level"] == "red"
+    assert m.state(1, None, True, T0 + 1)["active_level"] == "none"
+
+
 def test_test_alert_sets_level_expires_and_cancels():
     m = AlertMonitor()
     m.set_test(1, "red", 10, T0)
@@ -501,6 +637,7 @@ DEVICE_KEYS = {
 STATE_KEYS = {
     "generated_at", "collecting", "level", "active_level", "snoozed", "snoozed_until",
     "snooze_seconds_left", "snooze_seconds", "test", "devices", "signal_lost", "remote_mode",
+    "acknowledged", "acknowledged_until", "ack_seconds_left",
 }
 
 
@@ -534,8 +671,16 @@ def test_api_alert_routes(app_bundle):
         s = client.get("/api/alert-state").json()
         assert s["snoozed"] is True and s["active_level"] == "none"
 
+        ack = client.post("/api/alert/acknowledge").json()
+        assert set(ack) == {"acknowledged_until"} and ack["acknowledged_until"].endswith("Z")
+        s = client.get("/api/alert-state").json()
+        assert s["acknowledged"] is True and s["snoozed"] is False and s["active_level"] == "none"
+        assert s["level"] == "red" and s["acknowledged_until"] == ack["acknowledged_until"]
+        assert 595 <= s["ack_seconds_left"] <= 600
+
         ALERTS.reset()
         assert client.post("/api/alert/snooze").json()["snoozed_until"] is None
+        assert client.post("/api/alert/acknowledge").json() == {"acknowledged_until": None}
 
         r = client.post("/api/alert/test", json={"level": "amber", "seconds": 30})
         assert r.status_code == 200 and set(r.json()) == STATE_KEYS
@@ -586,6 +731,19 @@ def test_api_snooze_is_user_scoped_and_other_users_polls_cannot_cancel_it(two_al
         assert s["snoozed"] is True and s["active_level"] == "none"
 
 
+def test_api_acknowledge_is_user_scoped(two_alert_users):
+    app, ((alice_token, _), (bob_token, bob_account)) = two_alert_users
+    with client_for(app, alice_token) as alice, client_for(app, bob_token) as bob:
+        assert alice.post("/api/alert/acknowledge").json()["acknowledged_until"] is not None
+        b = bob.get("/api/alert-state").json()
+        assert b["active_level"] == "red" and b["acknowledged"] is False
+        for i in (2, 3):
+            ALERTS.observe(bob_account, "bob", reading(i, 97), 90, 86, time.time())
+        assert bob.get("/api/alert-state").json()["level"] == "none"
+        s = alice.get("/api/alert-state").json()
+        assert s["acknowledged"] is True and s["active_level"] == "none" and s["level"] == "red"
+
+
 def test_api_test_alerts_are_user_scoped(two_alert_users):
     app, ((alice_token, _), (bob_token, _)) = two_alert_users
     with client_for(app, alice_token) as alice, client_for(app, bob_token) as bob:
@@ -626,6 +784,26 @@ def test_alert_routes_report_remote_mode_from_desktop_configuration(desktop_app,
         assert s["collecting"] is False and s["remote_mode"] is expected
         s = client.post("/api/alert/test", json={"level": "red"}).json()
         assert s["remote_mode"] is expected
+
+
+@pytest.mark.parametrize("origin,expected", [
+    (None, 200),
+    ("http://127.0.0.1:8877", 200),
+    ("http://localhost:8877", 200),
+    ("https://evil.example", 403),
+    ("http://127.0.0.1:8877.evil.example", 403),
+    ("http://127.0.0.1:8878", 403),
+    ("null", 403),
+    ("", 403),
+])
+def test_desktop_origin_guard_cannot_acknowledge_from_another_site(desktop_app, origin, expected):
+    with client_for(desktop_app) as client:
+        assert client.post("/api/alert/test", json={"level": "red"}).status_code == 200
+        headers = {} if origin is None else {"Origin": origin}
+        assert client.post("/api/alert/acknowledge", headers=headers).status_code == expected
+        s = client.get("/api/alert-state").json()
+        assert s["acknowledged"] is (expected == 200)
+        assert s["active_level"] == ("none" if expected == 200 else "red")
 
 
 @pytest.mark.parametrize("origin,expected", [

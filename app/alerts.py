@@ -33,6 +33,8 @@ STALE_MAX_SECONDS = 300
 TEST_DEFAULT_SECONDS = 20
 TEST_MIN_SECONDS = 5
 TEST_MAX_SECONDS = 120
+ACK_GRACE_SECONDS = 180  # silence kept after recovery while acknowledged
+ACK_MAX_SECONDS = 600  # hard cap on an acknowledge, from when it was pressed
 TEST_SERIAL = "TEST"
 
 LEVELS = ("none", "amber", "red")
@@ -251,6 +253,20 @@ class _UserAlerts:
     snoozed_level: str | None = None
     test_level: str | None = None
     test_until: float | None = None
+    acknowledged_at: float | None = None
+    acknowledged_level: str | None = None
+    recovered_at: float | None = None
+
+    def ack_until(self) -> float | None:
+        if self.acknowledged_at is None:
+            return None
+        cap = self.acknowledged_at + ACK_MAX_SECONDS
+        if self.recovered_at is None:
+            return cap
+        return min(self.recovered_at + ACK_GRACE_SECONDS, cap)
+
+    def clear_ack(self) -> None:
+        self.acknowledged_at = self.acknowledged_level = self.recovered_at = None
 
 
 class AlertMonitor:
@@ -310,9 +326,47 @@ class AlertMonitor:
         if level == "none":
             return None
         user = self._user(user_id)
-        user.snoozed_until = now + secs
+        self._update_ack(user, level, now)
+        until = now + secs
+        ack_until = user.ack_until()
+        if ack_until is not None:
+            # A snooze never outlasts the acknowledge it sits under.
+            until = min(until, ack_until)
+        user.snoozed_until = until
         user.snoozed_level = level
         return user.snoozed_until
+
+    def acknowledge(self, user_id: int, account_ids: list[int] | None, now: float) -> float | None:
+        """"I'm checking": silence until the level recovers (+ grace), capped
+        at ACK_MAX_SECONDS from now. A worse level still breaks through."""
+        level = _worst([d["level"] for d in self._devices(user_id, account_ids, now)])
+        if level == "none":
+            return None
+        user = self._user(user_id)
+        user.acknowledged_at = now
+        user.acknowledged_level = level
+        user.recovered_at = None
+        user.snoozed_until = user.snoozed_level = None
+        return user.ack_until()
+
+    def _update_ack(self, user: _UserAlerts, level: str, now: float) -> None:
+        """Apply the acknowledge ending rules for the current level."""
+        if user.acknowledged_at is None:
+            return
+        if _RANK[level] > _RANK[user.acknowledged_level or "none"]:
+            user.clear_ack()
+            user.snoozed_until = user.snoozed_level = None
+            return
+        if level == "none":
+            if user.recovered_at is None:
+                user.recovered_at = now
+        else:
+            user.recovered_at = None
+        until = user.ack_until()
+        if until is None or now >= until:
+            user.clear_ack()
+            # Nothing may keep the alert quiet past the acknowledge's end.
+            user.snoozed_until = user.snoozed_level = None
 
     # ---- outputs ------------------------------------------------------------
     def _test_device(self, user_id: int, now: float) -> dict[str, Any] | None:
@@ -359,6 +413,9 @@ class AlertMonitor:
         devices = self._devices(user_id, account_ids, now)
         level = _worst([d["level"] for d in devices])
         user = self._user(user_id)
+        self._update_ack(user, level, now)
+        acknowledged = user.acknowledged_at is not None
+        ack_until = user.ack_until()
         if user.snoozed_until is not None:
             expired = now >= user.snoozed_until
             escalated = _RANK[level] > _RANK[user.snoozed_level or "none"]
@@ -370,7 +427,7 @@ class AlertMonitor:
             "collecting": bool(collecting),
             "remote_mode": bool(remote_mode),
             "level": level,
-            "active_level": "none" if snoozed else level,
+            "active_level": "none" if (snoozed or acknowledged) else level,
             "signal_lost": any(d["signal_lost"] for d in devices),
             "snoozed": snoozed,
             "snoozed_until": _iso(user.snoozed_until),
@@ -378,6 +435,9 @@ class AlertMonitor:
             "snooze_seconds": clamp_setting_seconds(
                 snooze_seconds, SNOOZE_SECONDS, SNOOZE_MIN_SECONDS, SNOOZE_MAX_SECONDS
             ),
+            "acknowledged": acknowledged,
+            "acknowledged_until": _iso(ack_until),
+            "ack_seconds_left": max(0, int(round(ack_until - now))) if ack_until is not None else 0,
             "test": user.test_level is not None,
             "devices": devices,
         }

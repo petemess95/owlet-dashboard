@@ -1094,6 +1094,12 @@ def create_app(
             "snooze_seconds": secs,
         }
 
+    @app.post("/api/alert/acknowledge")
+    async def alert_acknowledge(user: dict = Depends(require_user)):
+        ids = await _scope(user, None)
+        until = ALERTS.acknowledge(user["id"], ids, time.time())
+        return {"acknowledged_until": alert_iso(until)}
+
     @app.post("/api/alert/test")
     async def alert_test(body: AlertTestBody, user: dict = Depends(require_user)):
         now = time.time()
