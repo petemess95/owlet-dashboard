@@ -24,7 +24,7 @@ THEME_RESOLVER = """<script>
       ? saved
       : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     document.documentElement.dataset.theme = mode;
-  } catch (e) { document.documentElement.dataset.theme = 'light'; }
+  } catch (e) { document.documentElement.dataset.theme = 'dark'; }
 })();
 </script>"""
 
@@ -1280,6 +1280,96 @@ SHELL_JS = """<script>
     });
   }).catch(function () {});
 
+  // ---- armed chip: desktop app only ---------------------------------------
+  // Asks the desktop shell (Tauri command `armed_state`) whether THIS PC's
+  // alert path is working: server reachable, data fresh, audio audible, PC
+  // kept awake. It never says anything about the baby. Contract:
+  //   { armed: bool, problems: [{ code, text }] }
+  //   codes: server, not_collecting, stale, no_audio, muted, sleep, watchdog
+  // A hosted page has no Tauri bridge and gets no chip and no placeholder.
+  // If the command is missing or fails (an older shell), the chip stays
+  // hidden. Once it HAS answered, a shell that goes quiet shows "unknown"
+  // in amber: a stale "Alerts armed" would be a false reassurance.
+  (function () {
+    var invoke = tauriInvoke();
+    if (!invoke) return;
+    var POLL_MS = 5000, QUIET_MS = 15000;
+    var chip = null, everOk = false, lastOkAt = 0, pendingSince = 0, shown = '';
+    function ensureChip() {
+      if (chip) return chip;
+      var top = document.querySelector('.shell-top');
+      if (!top) return null;
+      var side = byId('profileMenuWrap');
+      chip = document.createElement('span');
+      chip.id = 'armedChip';
+      chip.setAttribute('role', 'status');
+      var dot = document.createElement('i');
+      dot.className = 'ac-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      var text = document.createElement('span');
+      text.className = 'ac-text';
+      chip.appendChild(dot);
+      chip.appendChild(text);
+      top.insertBefore(chip, side && side.parentNode === top ? side : null);
+      return chip;
+    }
+    // kind: 'armed' | 'fault' | 'info'. The words always carry the state;
+    // colour and dot shape only repeat it.
+    function show(kind, text, title) {
+      var el = ensureChip();
+      if (!el) return;
+      var key = kind + '|' + text + '|' + title;
+      el.hidden = false;
+      if (key === shown) return;   // unchanged: don't re-announce every 5 s
+      shown = key;
+      el.className = 'armed-chip ' + kind;
+      el.title = title;
+      el.querySelector('.ac-text').textContent = text;
+    }
+    function hide() { if (chip) chip.hidden = true; shown = ''; }
+    function render(state) {
+      if (!state || typeof state.armed !== 'boolean') return false;
+      var problems = (Array.isArray(state.problems) ? state.problems : []).filter(function (p) {
+        return p && typeof p.text === 'string' && p.text;
+      });
+      // not_collecting (sock off, no account linked, viewing a remote server)
+      // is "not monitoring", not a fault. Anything else is a fault and wins.
+      var faults = problems.filter(function (p) { return p.code !== 'not_collecting'; });
+      var all = problems.map(function (p) { return p.text; }).join(' · ');
+      if (faults.length || (!state.armed && !problems.length)) {
+        show('fault', faults.length ? faults[0].text : 'Alerts not armed',
+          'This PC may not sound an alert' + (all ? ': ' + all : '.'));
+      } else if (problems.length) {
+        show('info', problems[0].text, 'Not monitoring on this PC: ' + all);
+      } else {
+        show('armed', 'Alerts armed',
+          'This PC\\'s alert path is working. It says nothing about your baby, '
+          + 'only that this PC can raise an alert.');
+      }
+      return true;
+    }
+    function settle(ok) {
+      pendingSince = 0;
+      if (ok) { everOk = true; lastOkAt = Date.now(); }
+      else if (!everOk) hide();
+    }
+    function tick() {
+      var now = Date.now();
+      if (everOk && now - lastOkAt > QUIET_MS) {
+        show('fault', 'Alert status unknown',
+          'The desktop app has stopped reporting whether this PC can sound an alert.');
+      }
+      if (pendingSince && now - pendingSince < QUIET_MS) return;   // still waiting
+      pendingSince = now;
+      var call;
+      try { call = Promise.resolve(invoke('armed_state')); }
+      catch (error) { call = Promise.reject(error); }
+      call.then(function (state) { settle(render(state)); }, function () { settle(false); });
+    }
+    tick();
+    setInterval(tick, POLL_MS);
+  })();
+
   // Warm the other tabs into the service-worker cache so the first switch
   // paints instantly too.
   setTimeout(function () {
@@ -1297,13 +1387,18 @@ SHELL_JS = """<script>
 def render_shell(
     *, view: str, title: str, head: str = "", body: str, scripts: str = "", wide: bool = False
 ) -> str:
+    # The current page is the lighter pill segment; aria-current says the same
+    # thing to assistive tech, so the active tab is never colour-only.
+    def _tab_attrs(key: str) -> str:
+        return 'class="active" aria-current="page"' if key == view else 'class=""'
+
     tabs_top = "".join(
-        f'<a href="{href}" class="{"active" if key == view else ""}">{label}</a>'
+        f'<a href="{href}" {_tab_attrs(key)}>{label}</a>'
         for key, label, href, _icon in TABS
     )
     tabs_bottom = "".join(
-        f'<a href="{href}" class="{"active" if key == view else ""}">'
-        f"<span>{icon}</span>{label}</a>"
+        f'<a href="{href}" {_tab_attrs(key)}>'
+        f'<span aria-hidden="true">{icon}</span>{label}</a>'
         for key, label, href, icon in TABS
     )
     return f"""<!doctype html>
@@ -1311,7 +1406,7 @@ def render_shell(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#122033" />
+  <meta name="theme-color" content="#070925" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Owlet" />
