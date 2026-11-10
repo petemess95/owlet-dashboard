@@ -9,6 +9,9 @@ fn main() {
                 "show_main",
                 "hide_widget",
                 "overlay_state",
+                "get_desktop_settings",
+                "set_desktop_settings",
+                "list_monitors",
             ]),
         ),
     )

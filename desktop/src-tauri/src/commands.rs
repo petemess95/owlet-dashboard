@@ -6,6 +6,7 @@ use tauri::{AppHandle, Manager};
 use crate::audio::stop_alarm;
 use crate::http::http_json;
 use crate::overlay::hide_overlay;
+use crate::settings::{data_dir, DesktopSettings};
 use crate::tray::sync_widget_toggle;
 use crate::{log_line, Shell};
 
@@ -75,6 +76,62 @@ pub(crate) fn hide_widget(app: AppHandle) {
 #[tauri::command]
 pub(crate) fn overlay_state(app: AppHandle) -> Value {
     app.state::<Shell>().overlay_payload.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub(crate) fn get_desktop_settings(state: tauri::State<'_, DesktopSettings>) -> Value {
+    state.get_json()
+}
+
+/// Returns the full new settings, or `{error: {field, message}}` as a normal
+/// value (never a rejected promise). Nothing changes on error.
+#[tauri::command]
+pub(crate) fn set_desktop_settings(state: tauri::State<'_, DesktopSettings>, patch: Value) -> Value {
+    match state.apply_patch(&data_dir(), &patch) {
+        Ok(new) => new.to_json(),
+        Err(err) => {
+            log_line(&format!("settings rejected ({}): {}", err.field, err.message));
+            err.to_json()
+        }
+    }
+}
+
+/// "Display 1 · 2560×1440" from the Windows name `\\.\DISPLAY1`.
+fn monitor_label(name: &str, width: u32, height: u32) -> String {
+    let digits = name
+        .to_ascii_uppercase()
+        .rsplit_once("DISPLAY")
+        .map(|(_, d)| d.to_string())
+        .filter(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit()));
+    let base = match digits {
+        Some(d) => format!("Display {d}"),
+        None => name.to_string(),
+    };
+    format!("{base} \u{b7} {width}\u{d7}{height}")
+}
+
+#[tauri::command]
+pub(crate) fn list_monitors(app: AppHandle) -> Value {
+    let key = |m: &tauri::Monitor| {
+        (m.name().cloned().unwrap_or_default(), m.position().x, m.position().y)
+    };
+    let primary = app.primary_monitor().ok().flatten().map(|m| key(&m));
+    let monitors = app.available_monitors().unwrap_or_default();
+    Value::Array(
+        monitors
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let name = m.name().cloned().unwrap_or_else(|| format!("monitor-{i}"));
+                let size = m.size();
+                serde_json::json!({
+                    "id": name,
+                    "name": monitor_label(&name, size.width, size.height),
+                    "is_primary": primary.as_ref() == Some(&key(m)),
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Raise a native Windows toast. Called from the dashboard JS for critical

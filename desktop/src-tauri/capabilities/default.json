@@ -12,6 +12,9 @@
     "allow-show-native-toast",
     "allow-snooze-alert",
     "allow-show-main",
-    "allow-hide-widget"
+    "allow-hide-widget",
+    "allow-get-desktop-settings",
+    "allow-set-desktop-settings",
+    "allow-list-monitors"
   ]
 }

@@ -9,6 +9,7 @@ mod audio;
 mod commands;
 mod http;
 mod overlay;
+mod settings;
 mod tray;
 
 use alert_loop::AppliedState;
@@ -252,14 +253,22 @@ fn main() {
             commands::snooze_alert,
             commands::show_main,
             commands::hide_widget,
-            commands::overlay_state
+            commands::overlay_state,
+            commands::get_desktop_settings,
+            commands::set_desktop_settings,
+            commands::list_monitors
         ])
         .manage(ServerProcess(Mutex::new(None)))
         .manage(Shell::default())
+        .manage(settings::DesktopSettings::new(settings::Settings::default()))
         .on_menu_event(|app, event| tray::handle_menu(app, event.id().as_ref()))
         .setup(|app| {
             #[cfg(windows)]
             set_app_user_model_id(&app.config().identifier);
+            // Load shell settings before the alert thread starts. Any problem
+            // degrades to defaults inside load_from; it never aborts setup.
+            let loaded = settings::load_from(&settings::data_dir(), &log_line);
+            app.state::<settings::DesktopSettings>().replace(loaded);
             ensure_server(app)?;
             let reachable = TcpStream::connect(SERVER_ADDR).is_ok();
             log_line(&format!("server reachable: {reachable}; creating windows"));
