@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Today — night-sky mockup</title>
+<!-- Mockup only: static demo data, no server. The real app would bundle these two
+     open-licence fonts locally instead of loading them from the network. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #070925; --glow: #1c2052;
+    --card: #121442; --card-hi: #1a1d52; --inset: #0c0e33;
+    --line: rgba(190, 195, 255, .13);
+    --ink: #e7e7fb; --dim: #a9acd9; --faint: #7074a8;
+    --mint: #9be3c9;                       /* accent: icons, switches, "now" */
+    --o2: #9be3c9; --hr: #f0a6c0;          /* one colour per vital */
+    --sleep: #7c80e6; --sleep-deep: #4a4fc0; --awake: #d9b0a5; --move: #b9bcf0;
+    --warn: #ffcf66; --bad: #ff7b7b;
+    --sans: "Source Sans 3", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --serif: "Source Serif 4", Georgia, Cambria, serif;
+    --r: 28px;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--ink); min-height: 100vh; font: 16px/1.45 var(--sans);
+    background: radial-gradient(900px 420px at 50% 60px, var(--glow), transparent 70%) no-repeat, var(--bg); }
+  #stars { position: absolute; inset: 0 0 auto 0; height: 520px; pointer-events: none; overflow: hidden; }
+  #stars i { position: absolute; border-radius: 50%; background: #c9ccff; }
+  .wrap { position: relative; max-width: 1120px; margin: 0 auto; padding: 0 28px 64px; }
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* ---- top bar ---- */
+  header { display: flex; align-items: center; gap: 20px; padding: 22px 0; }
+  .avatar { width: 46px; height: 46px; border-radius: 50%; background: #2b2f55; display: grid; place-items: center;
+    color: var(--mint); font-weight: 700; font-size: 19px; flex: none; }
+  nav { display: flex; gap: 4px; padding: 5px; border-radius: 999px; background: rgba(10, 12, 40, .8);
+    border: 1px solid var(--line); margin: 0 auto; }
+  nav a { color: var(--ink); text-decoration: none; padding: 8px 20px; border-radius: 999px; font-weight: 600; font-size: 15px; }
+  nav a:hover { background: rgba(200, 203, 255, .07); }
+  nav a.on { background: rgba(200, 203, 255, .17); }
+  .chip { display: flex; align-items: center; gap: 8px; color: var(--mint); font-weight: 600; font-size: 14px; white-space: nowrap; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+
+  /* ---- greeting ---- */
+  .hello { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; padding: 26px 4px 30px; }
+  .hello h1 { margin: 0; font-size: 38px; font-weight: 700; line-height: 1.15; }
+  .hello p { margin: 6px 0 0; color: var(--dim); font-size: 17px; }
+  .hello p b { color: var(--ink); font-weight: 600; }
+  .seg { display: flex; padding: 4px; border-radius: 999px; background: var(--card); }
+  .seg button { all: unset; cursor: pointer; padding: 6px 15px; border-radius: 999px; color: var(--dim); font-size: 14px; font-weight: 600; }
+  .seg button:hover { color: var(--ink); }
+  .seg button.on { background: #d5d6f7; color: #14164a; }
+
+  /* ---- cards ---- */
+  .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
+  .card { background: var(--card); border-radius: var(--r); padding: 28px 32px; min-width: 0; }
+  .card h2 { margin: 0; font-size: 21px; font-weight: 700; }
+  .card .note { color: var(--dim); margin-top: 2px; }
+  .live { grid-column: span 12; background: linear-gradient(165deg, #33294b 0%, #1d1d4e 48%, #141645 100%); }
+  .vitals { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 22px; }
+  .vital { --c: var(--o2); min-width: 0; } .vital.hr { --c: var(--hr); }
+  .reading { display: flex; align-items: center; gap: 16px; }
+  .reading svg { width: 38px; height: 38px; fill: none; stroke: var(--c); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .reading .big { font-size: 84px; font-weight: 700; line-height: 1; letter-spacing: -.01em; }
+  .reading .unit { font-size: 24px; color: var(--dim); margin-left: 8px; font-weight: 400; }
+  .vital .label { color: var(--dim); font-size: 18px; margin: 2px 0 14px 54px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .vital .label .at { color: var(--ink); min-height: 1em; }
+  .plot { position: relative; background: var(--inset); border-radius: 14px; overflow: hidden; }
+  .plot svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .plot .th { position: absolute; right: 10px; transform: translateY(-115%); font-size: 12px; opacity: .9; }
+  .plot .cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink); opacity: 0; pointer-events: none; }
+  .plots-on .cross { opacity: .5; }
+  .ticks { display: flex; justify-content: space-between; color: var(--faint); font-size: 13px; margin-top: 8px; font-weight: 600; }
+  .ticks span:last-child { color: var(--mint); }
+
+  .move-card { grid-column: span 5; --c: var(--move); }
+  .meter { height: 12px; border-radius: 999px; margin: 26px 0 12px; position: relative;
+    background: linear-gradient(90deg, #3a3d86, #6a6398 60%, #9a8590); }
+  .meter i { position: absolute; top: -6px; width: 4px; height: 24px; border-radius: 2px; background: var(--mint); left: 9%; }
+  .ends { display: flex; justify-content: space-between; font-weight: 700; font-size: 17px; }
+  .ends span:last-child { color: var(--dim); }
+  .move-card .plot { margin-top: 20px; background: none; border-radius: 0; }
+
+  .sleep-card { grid-column: span 7; --c: var(--sleep); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0 22px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+  .pair .k { color: var(--dim); } .pair .v { font-size: 26px; font-weight: 700; line-height: 1.2; }
+  .sleep-card h3 { margin: 0; font-size: 18px; font-weight: 700; }
+  .sleep-card .plot { margin-top: 14px; border-radius: 8px; }
+  .legend { display: flex; gap: 18px; margin-top: 12px; color: var(--dim); font-size: 14px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; }
+
+  .story { grid-column: span 7; text-align: center; padding: 38px 32px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .moon { width: 34px; height: 34px; border-radius: 50%; box-shadow: inset -11px -3px 0 0 #f3ddb0; transform: rotate(-20deg); margin-bottom: 18px; }
+  .story p { margin: 0; font: 400 30px/1.25 var(--serif); }
+  .story p b { color: #8f93f2; font-weight: 400; }
+  .story small { display: block; color: var(--dim); font: 16px var(--sans); margin-top: 10px; }
+  .story a { margin-top: 20px; color: #a5a8f7; font-weight: 600; text-decoration: none; }
+  .story a:hover { text-decoration: underline; }
+
+  .list { grid-column: span 5; padding: 24px 32px; }
+  .list h2 { text-align: center; font-size: 19px; }
+  .list .sub { text-align: center; color: var(--dim); font-size: 15px; margin-bottom: 10px; }
+  .list dl { margin: 0; }
+  .list dl div { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .list dt { color: var(--dim); } .list dd { margin: 0; font-weight: 600; text-align: right; }
+  .list dd.ok { color: var(--mint); }
+
+  .aside { margin-top: 44px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; color: var(--faint); font-size: 14px; }
+  .widget { width: 300px; height: 118px; flex: none; border-radius: 20px; padding: 12px 18px; position: relative;
+    background: linear-gradient(165deg, #33294b, #171948 70%); }
+  .widget .w-top { display: flex; align-items: baseline; gap: 16px; }
+  .widget .w-o2 { font-size: 52px; font-weight: 700; line-height: 1; }
+  .widget .w-o2 small, .widget .w-hr small { font-size: 15px; color: var(--dim); font-weight: 400; margin-left: 4px; }
+  .widget .w-hr { font-size: 24px; font-weight: 700; }
+  .widget .w-st { color: var(--dim); font-size: 13.5px; margin-top: 10px; display: flex; align-items: center; gap: 8px; }
+  .widget .w-st i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); }
+  .widget svg { position: absolute; right: 16px; bottom: 16px; width: 92px; height: 26px; }
+
+  @media (max-width: 860px) {
+    .wrap { padding: 0 16px 48px; }
+    header { flex-wrap: wrap; } nav { order: 3; width: 100%; justify-content: space-between; } nav a { padding: 8px 12px; }
+    .hello h1 { font-size: 30px; }
+    .card { padding: 22px 20px; border-radius: 22px; }
+    .vitals { grid-template-columns: 1fr; gap: 28px; }
+    .move-card, .sleep-card, .story, .list { grid-column: span 12; }
+    .reading .big { font-size: 68px; }
+  }
+</style>
+</head>
+<body>
+<div id="stars"></div>
+<div class="wrap">
+  <header>
+    <div class="avatar">R</div>
+    <nav><a class="on" href="#">Today</a><a href="#">Tonight</a><a href="#">Rhythms</a><a href="#">Data</a></nav>
+    <span class="chip"><i></i>Alerts armed</span>
+  </header>
+
+  <section class="hello">
+    <div>
+      <h1>Your little one is asleep.</h1>
+      <p>Light sleep for <b>3h 00m</b> · fell asleep 6:00 PM, about 12 min earlier than usual</p>
+    </div>
+    <div class="seg" id="range">
+      <button class="on">1h</button><button>3h</button><button>6h</button><button>12h</button><button>24h</button>
+    </div>
+  </section>
+
+  <div class="grid" id="grid">
+    <section class="card live">
+      <h2>Live health readings</h2>
+      <div class="note">All readings are normal</div>
+      <div class="vitals">
+        <div class="vital o2">
+          <div class="reading">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v8M12 12c-1.5-1-3.5-.5-5 2-1.300 2.200-1.800 5.500-.5 6 1.500.6 4-.8 4-3v-3M12 12c1.500-1 3.500-.5 5 2 1.300 2.200 1.800 5.500.5 6-1.500.6-4-.8-4-3v-3"/></svg>
+            <div class="big tnum">97<span class="unit">%</span></div>
+          </div>
+          <div class="label"><span>Oxygen</span><span class="at tnum" data-at="o2"></span></div>
+          <div class="plot" data-plot="o2"></div>
+          <div class="ticks tnum" data-ticks></div>
+        </div>
+        <div class="vital hr">
+          <div class="reading">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.500-4.600-7.500-10.200A4.200 4.200 0 0 1 12 7.300a4.200 4.200 0 0 1 7.500 2.500C19.500 15.400 12 20 12 20z"/></svg>
+            <div class="big tnum">147<span class="unit">BPM</span></div>
+          </div>
+          <div class="label"><span>Pulse rate</span><span class="at tnum" data-at="hr"></span></div>
+          <div class="plot" data-plot="hr"></div>
+          <div class="ticks tnum" data-ticks></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card move-card">
+      <h2>Movement</h2>
+      <div class="meter"><i></i></div>
+      <div class="ends"><span>Peaceful</span><span>Wiggling</span></div>
+      <div class="plot" data-plot="move"></div>
+    </section>
+
+    <section class="card sleep-card">
+      <h2>Sleep summary</h2>
+      <div class="pair">
+        <div><div class="k">Time asleep today</div><div class="v tnum">3h 55m</div></div>
+        <div><div class="k">Wakings</div><div class="v tnum" id="wakings">0</div></div>
+      </div>
+      <h3>Sleep cycle</h3>
+      <div class="plot" data-plot="sleep"></div>
+      <div class="ticks tnum" data-ticks></div>
+      <div class="legend">
+        <span><i style="background:var(--sleep)"></i>Light</span>
+        <span><i style="background:var(--sleep-deep)"></i>Deep</span>
+        <span><i style="background:var(--awake)"></i>Awake</span>
+      </div>
+    </section>
+
+    <section class="card story">
+      <div class="moon"></div>
+      <p>Slept <b>11h 2m</b> last night</p>
+      <small>2 wake-ups · 0 oxygen dips · lowest 93%</small>
+      <a href="#">Last night's report →</a>
+    </section>
+
+    <section class="card list">
+      <h2>Dream Sock</h2>
+      <div class="sub">Receiving readings</div>
+      <dl>
+        <div><dt>Sock battery</dt><dd class="tnum">65% · about 12h</dd></div>
+        <div><dt>Skin temperature</dt><dd class="tnum">34.0°</dd></div>
+        <div><dt>Supplemental O₂</dt><dd class="tnum">1/32 L since 6:51 PM</dd></div>
+        <div><dt>O₂ dips today</dt><dd class="tnum">0</dd></div>
+        <div><dt>This PC's alerts</dt><dd class="ok">Armed · speakers 60%</dd></div>
+      </dl>
+    </section>
+  </div>
+
+  <div class="aside">
+    <div class="widget">
+      <div class="w-top">
+        <div class="w-o2 tnum">97<small>%</small></div>
+        <div class="w-hr tnum">147<small>BPM</small></div>
+      </div>
+      <div class="w-st"><i></i>Armed · updated 4s ago</div>
+      <svg id="wspark" viewBox="0 0 100 30" preserveAspectRatio="none"></svg>
+    </div>
+    <div>The always-on-top widget in the same style:<br>same card, same colours, 10-minute oxygen trace.</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var N = 240, NOW_MIN = 23 * 60 + 56, W = 1000;
+  var css = getComputedStyle(document.documentElement);
+  var col = function (n) { return css.getPropertyValue(n).trim(); };
+  var data = {}, hours = 1;
+
+  // Sparse fixed starfield behind the header.
+  (function () {
+    var r = rng(42), s = "";
+    for (var i = 0; i < 46; i++) {
+      var d = r() < .2 ? 3 : r() < .5 ? 2 : 1;
+      s += '<i style="left:' + (r() * 100).toFixed(2) + "%;top:" + (r() * 100).toFixed(2) + "%;width:" + d + "px;height:" + d +
+        "px;opacity:" + (.25 + r() * .5).toFixed(2) + '"></i>';
+    }
+    document.getElementById("stars").innerHTML = s;
+  })();
+
+  function rng(seed) { return function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+
+  function generate(h) {
+    var r = rng(7 + h * 31), o2 = [], hr = [], sleep = [], move = [], a = 96.8, b = 146, i;
+    var deepAt = Math.floor(N * .1), wakes = h > 3 ? [Math.floor(N * .34), Math.floor(N * .71)] : [];
+    for (i = 0; i < N; i++) {
+      a += (r() - .5) * 1.5 + (96.8 - a) * .18; if (r() < .012) a -= 2.5;
+      b += (r() - .5) * 7 + (146 - b) * .1; if (r() < .03) b += 9;
+      var awake = wakes.some(function (w) { return i >= w && i < w + 9; });
+      o2.push(Math.max(91, Math.min(99.4, a)));
+      hr.push(awake ? b + 14 : b);
+      sleep.push(awake ? "awake" : (i >= deepAt && i < deepAt + 6) || (h > 1 && i % 60 > 44) ? "deep" : "light");
+      move.push(awake ? 30 + r() * 60 : r() < .055 ? 12 + r() * 55 : r() * 3);
+    }
+    o2[N - 1] = 97; hr[N - 1] = 147; sleep[N - 1] = "light"; move[N - 1] = 2;
+    return { o2: o2, hr: hr, sleep: sleep, move: move, wakes: wakes.length };
+  }
+
+  var X = function (i) { return (i / (N - 1)) * W; };
+  function fill(key, h, inner, extra) {
+    var el = document.querySelector('[data-plot="' + key + '"]');
+    el.style.height = h + "px";
+    el.innerHTML = '<svg viewBox="0 0 ' + W + " " + h + '" preserveAspectRatio="none" aria-hidden="true">' + inner +
+      "</svg>" + (extra || "") + '<i class="cross"></i>';
+  }
+
+  function line(key, min, max, h, c, thresholds) {
+    var d = data[key];
+    var Y = function (v) { return h - 10 - ((v - min) / (max - min)) * (h - 22); };
+    var p = d.map(function (v, i) { return (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1); }).join("");
+    var s = '<defs><linearGradient id="g-' + key + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + c +
+      '" stop-opacity=".22"/><stop offset="1" stop-color="' + c + '" stop-opacity="0"/></linearGradient></defs>' +
+      '<path d="' + p + "L" + W + " " + h + "L0 " + h + 'Z" fill="url(#g-' + key + ')"/>';
+    var labels = "";
+    (thresholds || []).forEach(function (t) {
+      s += '<line x1="0" x2="' + W + '" y1="' + Y(t.v) + '" y2="' + Y(t.v) + '" stroke="' + t.c +
+        '" stroke-width="1" stroke-dasharray="3 6" opacity=".6" vector-effect="non-scaling-stroke"/>';
+      labels += '<span class="th" style="top:' + (Y(t.v) / h * 100) + "%;color:" + t.c + '">' + t.label + "</span>";
+    });
+    s += '<path d="' + p + '" fill="none" stroke="' + c + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+    fill(key, h, s, labels);
+  }
+
+  function band() {
+    var d = data.sleep, h = 44, s = "", start = 0, step = W / (N - 1);
+    var style = { light: col("--sleep"), deep: col("--sleep-deep"), awake: col("--awake") };
+    for (var i = 1; i <= N; i++) {
+      if (i === N || d[i] !== d[start]) {
+        var x0 = start ? X(start) - step / 2 : 0, x1 = i === N ? W : X(i) - step / 2;
+        s += '<rect x="' + x0.toFixed(1) + '" width="' + (x1 - x0).toFixed(1) + '" y="0" height="' + h + '" fill="' + style[d[start]] + '"/>';
+        start = i;
+      }
+    }
+    s += '<rect x="' + (W - 4) + '" width="4" y="0" height="' + h + '" fill="' + col("--mint") + '"/>';
+    fill("sleep", h, s);
+  }
+
+  function bars() {
+    var d = data.move, h = 56, c = col("--move"), s = "";
+    d.forEach(function (v, i) {
+      var bh = Math.max(2, (v / 100) * (h - 6));
+      s += '<rect x="' + (X(i) - 1.3).toFixed(1) + '" width="2.6" rx="1.3" y="' + (h - bh).toFixed(1) + '" height="' + bh.toFixed(1) +
+        '" fill="' + c + '" opacity="' + (v > 8 ? .85 : .3) + '"/>';
+    });
+    fill("move", h, s);
+  }
+
+  function clock(min) {
+    min = ((Math.round(min) % 1440) + 1440) % 1440;
+    var hh = Math.floor(min / 60), m = min % 60;
+    return (hh % 12 || 12) + ":" + (m < 10 ? "0" : "") + m + (hh < 12 ? " AM" : " PM");
+  }
+
+  function draw() {
+    data = generate(hours);
+    line("o2", 84, 100, 170, col("--o2"), [
+      { v: 90, c: col("--warn"), label: "amber below 90" }, { v: 86, c: col("--bad"), label: "red below 86" }]);
+    line("hr", 110, 185, 170, col("--hr"));
+    band(); bars();
+    document.getElementById("wakings").textContent = data.wakes;
+    document.querySelectorAll("[data-ticks]").forEach(function (el) {
+      el.innerHTML = "<span>" + clock(NOW_MIN - hours * 60) + "</span><span>now</span>";
+    });
+    var sp = data.o2.slice(-40).map(function (v, i) { return (i ? "L" : "M") + (i / 39 * 100).toFixed(1) + " " + (28 - (v - 90) / 10 * 26).toFixed(1); }).join("");
+    document.getElementById("wspark").innerHTML = '<path d="' + sp + '" fill="none" stroke="' + col("--o2") +
+      '" stroke-width="1.6" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+  }
+
+  // Hovering any chart moves one crosshair through all of them: same moment everywhere.
+  var grid = document.getElementById("grid");
+  var at = function (k, text) { grid.querySelector('[data-at="' + k + '"]').textContent = text; };
+  grid.addEventListener("mousemove", function (e) {
+    var plot = e.target.closest(".plot");
+    if (!plot) { leave(); return; }
+    var box = plot.getBoundingClientRect();
+    var f = Math.max(0, Math.min(1, (e.clientX - box.left) / box.width)), i = Math.round(f * (N - 1));
+    grid.classList.add("plots-on");
+    grid.querySelectorAll(".cross").forEach(function (c) { c.style.left = (f * 100) + "%"; });
+    var when = clock(NOW_MIN - hours * 60 * (1 - f));
+    at("o2", Math.round(data.o2[i]) + "% at " + when);
+    at("hr", Math.round(data.hr[i]) + " at " + when);
+  });
+  function leave() { grid.classList.remove("plots-on"); at("o2", ""); at("hr", ""); }
+  grid.addEventListener("mouseleave", leave);
+
+  document.getElementById("range").addEventListener("click", function (e) {
+    if (e.target.tagName !== "BUTTON") return;
+    this.querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b === e.target); });
+    hours = parseInt(e.target.textContent, 10); draw();
+  });
+
+  draw();
+})();
+</script>
+</body>
+</html>
