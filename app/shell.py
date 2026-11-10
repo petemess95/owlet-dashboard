@@ -1141,6 +1141,14 @@ SHELL_JS = """<script>
   var pollInterval = 5;
   var lastReadingAt = null;
   var sockReporting = true;
+  // Dot colours live in theme.css (--live-*); read at paint time so a theme
+  // switch is picked up on the next tick. Hex tokens only; fallback = old literal.
+  function liveRgb(name, fb) {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    var m = /^#([0-9a-f]{6})$/i.exec(v);
+    var n = parseInt(m ? m[1] : fb, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
   function paintDot() {
     var dot = document.getElementById('shellDot');
     if (!dot) return;
@@ -1156,17 +1164,19 @@ SHELL_JS = """<script>
     // The collector is alive but the sock itself has nothing to say
     // (off, charging, out of range) — amber, not green.
     if (!sockReporting && intervals <= 4) {
-      dot.style.backgroundColor = 'rgb(245,158,11)';
+      dot.style.backgroundColor = 'rgb(' + liveRgb('--live-notreporting', 'f59e0b').join(',') + ')';
       dot.title = 'Sock not reporting — it may be off or charging · click to refresh';
       return;
     }
     if (intervals <= 1.5) {
       var f = intervals / 1.5;
-      dot.style.backgroundColor = 'rgb(' + mix(16, 148, f) + ',' + mix(220, 163, f) + ',' + mix(96, 184, f) + ')';
+      var c0 = liveRgb('--live-fresh', '10dc60'), c1 = liveRgb('--live-idle', '94a3b8');
+      dot.style.backgroundColor = 'rgb(' + mix(c0[0], c1[0], f) + ',' + mix(c0[1], c1[1], f) + ',' + mix(c0[2], c1[2], f) + ')';
       dot.title = 'Live — data ' + Math.round(age / 1000) + 's old · click to refresh';
     } else {
       var g = Math.min(1, (intervals - 1.5) / 2.5);
-      dot.style.backgroundColor = 'rgb(' + mix(148, 239, g) + ',' + mix(163, 68, g) + ',' + mix(184, 68, g) + ')';
+      var d0 = liveRgb('--live-idle', '94a3b8'), d1 = liveRgb('--live-stale', 'ef4444');
+      dot.style.backgroundColor = 'rgb(' + mix(d0[0], d1[0], g) + ',' + mix(d0[1], d1[1], g) + ',' + mix(d0[2], d1[2], g) + ')';
       dot.title = 'No new data for ' + Math.round(age / 1000) + 's · click to refresh';
     }
   }

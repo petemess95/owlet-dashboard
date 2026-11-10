@@ -11,12 +11,12 @@ NIGHT_HEAD = """<style>
     :root[data-theme="dark"] .stars { opacity: .5; }
     .stars {
       background-image:
-        radial-gradient(1px 1px at 12% 22%, #fff 50%, transparent 50%),
-        radial-gradient(1px 1px at 78% 12%, #fff 50%, transparent 50%),
-        radial-gradient(1.5px 1.5px at 55% 8%, #cdd6ff 50%, transparent 50%),
-        radial-gradient(1px 1px at 32% 6%, #fff 50%, transparent 50%),
-        radial-gradient(1px 1px at 90% 38%, #cdd6ff 50%, transparent 50%),
-        radial-gradient(1.5px 1.5px at 8% 52%, #fff 50%, transparent 50%);
+        radial-gradient(1px 1px at 12% 22%, var(--star-bright) 50%, transparent 50%),
+        radial-gradient(1px 1px at 78% 12%, var(--star-bright) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 55% 8%, var(--star-dim) 50%, transparent 50%),
+        radial-gradient(1px 1px at 32% 6%, var(--star-bright) 50%, transparent 50%),
+        radial-gradient(1px 1px at 90% 38%, var(--star-dim) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 8% 52%, var(--star-bright) 50%, transparent 50%);
     }
     .night-nav { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
     .night-nav button { all: unset; cursor: pointer; color: var(--dim); font-size: 22px;
@@ -40,7 +40,7 @@ NIGHT_HEAD = """<style>
     .stat.warnish b { color: var(--warn); }
     .stat.calm b { color: var(--good); }
     .timeline-card { padding: 20px; margin-bottom: 34px; }
-    .timeline { display: flex; height: 44px; border-radius: 10px; overflow: hidden;
+    .timeline { display: flex; height: 44px; border-radius: var(--radius-control); overflow: hidden;
       background: var(--nodata); }
     .timeline span { height: 100%; }
     .tl-axis { display: flex; justify-content: space-between; font-size: 11px;

@@ -21,11 +21,7 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
       --line: var(--surface-line);
       /* Faint fill for inset panels/rows -- adapts to either theme. */
       --inset: color-mix(in srgb, var(--ink) 5%, transparent);
-      /* Read at runtime via themeToken('--series-temp'), not var() — renaming
-         it would fail silently, so keep the name in sync with that call. */
-      --series-temp: #0f766e;
     }
-    :root[data-theme="dark"] { --series-temp: #2dd4bf; }
     * { box-sizing: border-box; }
     .shell { width: 100%; margin: 0 auto; padding: 0 0 32px; }
     h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
@@ -58,7 +54,7 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     }
     button { cursor: pointer; font-weight: 600; }
     button:hover { border-color: var(--accent); }
-    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
     button.icon-button { width: 38px; height: 38px; padding: 0; display: inline-grid; place-items: center; border-radius: 999px; background: var(--inset); }
     .grid { display: grid; gap: 14px; }
     .grid > * { min-width: 0; }
@@ -87,7 +83,7 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     .chart-toolbar .inline-toggle { border: 1px solid var(--surface-line); border-radius: 999px; padding: 6px 9px; background: var(--surface); color: var(--text); }
     .coverage-chip { margin-left: auto; white-space: nowrap; }
     .o2-menu-wrap { position: relative; }
-    .o2-add-button { background: var(--accent); color: #fff; border-color: var(--accent); min-width: 54px; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent); }
+    .o2-add-button { background: var(--accent); color: var(--on-accent); border-color: var(--accent); min-width: 54px; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent); }
     .o2-add-menu { position: absolute; right: 0; top: calc(100% + 8px); display: grid; gap: 8px; width: min(240px, calc(100vw - 32px)); padding: 10px; border: 1px solid var(--surface-line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); z-index: 28; }
     .o2-add-menu.hidden { display: none; }
     .o2-add-menu button { justify-content: flex-start; text-align: left; }
@@ -140,9 +136,9 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     .challenge-item.active { border-left-color: var(--good); background: color-mix(in srgb, var(--good) 9%, transparent); }
     .challenge-title { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
     .challenge-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 7px; font-size: .78rem; }
-    .challenge-metrics span { background: var(--surface); border: 1px solid var(--surface-line); border-radius: 10px; padding: 5px 6px; }
+    .challenge-metrics span { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--radius-control); padding: 5px 6px; }
     .challenge-empty-actions { display: grid; gap: 8px; margin-top: 14px; }
-    .challenge-modal { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: rgba(10, 12, 30, .45); }
+    .challenge-modal { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: var(--scrim); }
     .challenge-modal-card { width: min(980px, 100%); max-height: min(780px, calc(100vh - 32px)); overflow: auto; background: var(--surface-solid); border: 1px solid var(--surface-line); border-radius: var(--radius-card); box-shadow: var(--shadow); padding: 16px; }
     .challenge-edit-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; padding: 12px; background: var(--inset); border: 1px solid var(--line); border-radius: 14px; }
     .challenge-edit-form label { display: grid; gap: 5px; }
@@ -201,7 +197,7 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     tr.challenge-row td { background: var(--accent-soft); color: var(--accent); }
     tr.selected-row td { background: color-mix(in srgb, var(--accent) 10%, var(--surface)) !important; }
     .table-wrap { overflow: auto; max-width: 100%; max-height: 460px; border: 1px solid var(--line); border-radius: 14px; }
-    .raw-box { white-space: pre-wrap; word-break: break-word; background: var(--ink); color: var(--bg); border-radius: 14px; padding: 14px; max-height: 280px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+    .raw-box { white-space: pre-wrap; word-break: break-word; background: var(--ink); color: var(--bg); border-radius: 14px; padding: 14px; max-height: 280px; overflow: auto; font-family: var(--font-mono); font-size: .8rem; }
     .empty { padding: 28px; text-align: center; color: var(--muted); border: 1px dashed var(--surface-line); border-radius: var(--radius-card); background: var(--inset); }
     .progress { height: 10px; border-radius: 999px; overflow: hidden; background: var(--nodata); margin-top: 12px; display: flex; }
     .progress span:nth-child(1) { background: var(--sleep-light); }
@@ -228,7 +224,7 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
       .desktop-label { display: none; }
       .mobile-label { display: inline; }
       label { font-size: .76rem; }
-      select, button { padding: .38rem .42rem; border-radius: 10px; font-size: .78rem; min-height: 32px; }
+      select, button { padding: .38rem .42rem; border-radius: var(--radius-control); font-size: .78rem; min-height: 32px; }
       button.icon-button { width: 34px; height: 34px; }
       .challenge-button { white-space: nowrap; }
       .challenge-count { min-width: 17px; height: 17px; padding: 0 4px; margin-left: 2px; font-size: .64rem; }
@@ -249,12 +245,12 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
       .chart-frame.main { height: 430px; }
       .chart-frame.companion { height: 215px; }
       .chart-frame.secondary { height: 295px; }
-      .challenge-popover { position: fixed; inset: 8px; width: auto; max-height: none; border-radius: 18px; z-index: 80; display: flex; flex-direction: column; box-shadow: 0 0 0 9999px rgba(10, 12, 30, .45), var(--shadow); }
+      .challenge-popover { position: fixed; inset: 8px; width: auto; max-height: none; border-radius: var(--radius-card); z-index: 80; display: flex; flex-direction: column; box-shadow: 0 0 0 9999px var(--scrim), var(--shadow); }
       .challenge-list { max-height: none; flex: 1; }
       .challenge-actions { display: grid !important; grid-template-columns: 1fr 1fr; align-items: stretch; }
       .challenge-actions .wide { grid-column: 1 / -1; }
       .challenge-modal { align-items: center; padding: 8px; }
-      .challenge-modal-card { width: 100%; max-height: 88vh; border-radius: 18px 18px 12px 12px; padding: 12px; }
+      .challenge-modal-card { width: 100%; max-height: 88vh; border-radius: var(--radius-card) var(--radius-card) 12px 12px; padding: 12px; }
       .challenge-summary-grid, .challenge-edit-form { grid-template-columns: 1fr; }
       .challenge-edit-form .full { grid-column: auto; }
       .time-pan-control { grid-template-columns: 1fr; gap: 4px; }
@@ -592,19 +588,19 @@ DATA_BODY = r"""
     let applyingAccountPreferences = false;
 
     const sleepPhaseColors = {
-      light: 'rgba(124, 58, 237, .21)',
-      deep: 'rgba(37, 99, 235, .21)',
-      awake: 'rgba(180, 83, 9, .20)',
-      inactive: 'rgba(148, 163, 184, .16)',
-      offline: 'rgba(100, 116, 139, .18)'
+      light: themeToken('--chart-phase-light', 'rgba(124, 58, 237, .21)'),
+      deep: themeToken('--chart-phase-deep', 'rgba(37, 99, 235, .21)'),
+      awake: themeToken('--chart-phase-awake', 'rgba(180, 83, 9, .20)'),
+      inactive: themeToken('--chart-phase-inactive', 'rgba(148, 163, 184, .16)'),
+      offline: themeToken('--chart-phase-offline', 'rgba(100, 116, 139, .18)')
     };
 
     const stateStripColors = {
-      light: 'rgba(124, 58, 237, .72)',
-      deep: 'rgba(37, 99, 235, .72)',
-      awake: 'rgba(180, 83, 9, .72)',
-      inactive: 'rgba(148, 163, 184, .72)',
-      offline: 'rgba(100, 116, 139, .48)'
+      light: themeToken('--chart-strip-light', 'rgba(124, 58, 237, .72)'),
+      deep: themeToken('--chart-strip-deep', 'rgba(37, 99, 235, .72)'),
+      awake: themeToken('--chart-strip-awake', 'rgba(180, 83, 9, .72)'),
+      inactive: themeToken('--chart-strip-inactive', 'rgba(148, 163, 184, .72)'),
+      offline: themeToken('--chart-strip-offline', 'rgba(100, 116, 139, .48)')
     };
 
     const PANEL_CANVAS_IDS = ['vitalsChart', 'hrPanelChart', 'spo2PanelChart', 'movePanelChart'];
@@ -615,8 +611,8 @@ DATA_BODY = r"""
         if (!intervals.length || !chart.scales?.x) return;
         const { ctx, chartArea, scales } = chart;
         ctx.save();
-        ctx.fillStyle = 'rgba(100, 116, 139, 0.14)';
-        ctx.strokeStyle = 'rgba(100, 116, 139, 0.32)';
+        ctx.fillStyle = themeToken('--chart-offline-fill', 'rgba(100, 116, 139, 0.14)');
+        ctx.strokeStyle = themeToken('--chart-offline-line', 'rgba(100, 116, 139, 0.32)');
         intervals.forEach(({ start, end }) => {
           const left = Math.max(chartArea.left, scales.x.getPixelForValue(start));
           const right = Math.min(chartArea.right, scales.x.getPixelForValue(end));
@@ -644,9 +640,9 @@ DATA_BODY = r"""
           ctx.beginPath();
           ctx.rect(left, chartArea.top, width, height);
           ctx.clip();
-          ctx.fillStyle = 'rgba(148, 163, 184, 0.10)';
+          ctx.fillStyle = themeToken('--chart-nodata-fill', 'rgba(148, 163, 184, 0.10)');
           ctx.fillRect(left, chartArea.top, width, height);
-          ctx.strokeStyle = 'rgba(100, 116, 139, 0.22)';
+          ctx.strokeStyle = themeToken('--chart-nodata-line', 'rgba(100, 116, 139, 0.22)');
           ctx.lineWidth = 1;
           for (let x = left - height; x < right; x += 14) {
             ctx.beginPath();
@@ -655,7 +651,7 @@ DATA_BODY = r"""
             ctx.stroke();
           }
           if (width > 78) {
-            ctx.fillStyle = 'rgba(71, 85, 105, 0.78)';
+            ctx.fillStyle = themeToken('--chart-nodata-text', 'rgba(71, 85, 105, 0.78)');
             ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
@@ -673,8 +669,12 @@ DATA_BODY = r"""
         const { ctx, chartArea, scales } = chart;
         const isTrendCompanion = chart.canvas.id === 'oxygenTrendChart';
         ctx.save();
-        ctx.fillStyle = isTrendCompanion ? 'rgba(37, 99, 235, 0.10)' : 'rgba(37, 99, 235, 0.13)';
-        ctx.strokeStyle = isTrendCompanion ? 'rgba(29, 78, 216, 0.78)' : 'rgba(29, 78, 216, 0.62)';
+        ctx.fillStyle = isTrendCompanion
+          ? themeToken('--chart-challenge-fill-trend', 'rgba(37, 99, 235, 0.10)')
+          : themeToken('--chart-challenge-fill', 'rgba(37, 99, 235, 0.13)');
+        ctx.strokeStyle = isTrendCompanion
+          ? themeToken('--chart-challenge-line-trend', 'rgba(29, 78, 216, 0.78)')
+          : themeToken('--chart-challenge-line', 'rgba(29, 78, 216, 0.62)');
         ctx.lineWidth = isTrendCompanion ? 3 : 2;
         ctx.setLineDash(isTrendCompanion ? [7, 5] : [8, 5]);
         intervals.forEach(({ start, end }) => {
@@ -844,7 +844,7 @@ DATA_BODY = r"""
         const max = Number(scales.x.max);
         if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return;
         ctx.save();
-        ctx.strokeStyle = 'rgba(15, 23, 42, .38)';
+        ctx.strokeStyle = themeToken('--chart-day-boundary', 'rgba(15, 23, 42, .38)');
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 5]);
         dayBoundaryTimes({ min, max }).forEach(time => {
@@ -949,13 +949,21 @@ DATA_BODY = r"""
       const age = Math.max(0, Date.now() - lastDataAt);
       const intervals = age / totalMs;
       const mix = (from, to, fade) => Math.round(from + (to - from) * fade);
+      // Colours come from theme.css (--live-*), hex only, read on every paint.
+      const liveRgb = (name, fb) => {
+        const m = /^#([0-9a-f]{6})$/i.exec(themeToken(name, ''));
+        const n = parseInt(m ? m[1] : fb, 16);
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      };
       if (intervals <= 1.5) {
         const fade = intervals / 1.5;
-        dot.style.backgroundColor = `rgb(${mix(16, 148, fade)}, ${mix(220, 163, fade)}, ${mix(96, 184, fade)})`;
+        const c0 = liveRgb('--live-fresh', '10dc60'), c1 = liveRgb('--live-idle', '94a3b8');
+        dot.style.backgroundColor = `rgb(${mix(c0[0], c1[0], fade)}, ${mix(c0[1], c1[1], fade)}, ${mix(c0[2], c1[2], fade)})`;
         dot.title = `Auto-refresh in ${secondsUntilRefresh}s — click to refresh now`;
       } else {
         const fade = Math.min(1, (intervals - 1.5) / 2.5); // fully red by ~4 missed intervals
-        dot.style.backgroundColor = `rgb(${mix(148, 239, fade)}, ${mix(163, 68, fade)}, ${mix(184, 68, fade)})`;
+        const d0 = liveRgb('--live-idle', '94a3b8'), d1 = liveRgb('--live-stale', 'ef4444');
+        dot.style.backgroundColor = `rgb(${mix(d0[0], d1[0], fade)}, ${mix(d0[1], d1[1], fade)}, ${mix(d0[2], d1[2], fade)})`;
         dot.title = `No new data for ${Math.round(age / 1000)}s — click to retry`;
       }
     }
@@ -3093,7 +3101,7 @@ DATA_BODY = r"""
         banner.style.cssText = 'background:color-mix(in srgb, var(--awake) 10%, var(--surface));'
           + 'color:var(--dim);border:1px solid color-mix(in srgb, var(--awake) 45%, transparent);'
           + 'padding:9px 14px;font-size:13px;'
-          + 'border-radius:10px;margin:8px 0;display:flex;justify-content:space-between;gap:12px;align-items:center';
+          + 'border-radius:var(--radius-control);margin:8px 0;display:flex;justify-content:space-between;gap:12px;align-items:center';
         banner.innerHTML = '<span>Desktop mode: readings are only collected while this app is running. '
           + 'Time it spends closed appears as “collector off” gaps in the charts.</span>'
           + '<button type="button" aria-label="Dismiss" style="all:unset;cursor:pointer;font-weight:700;padding:4px 8px">✕</button>';

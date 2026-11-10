@@ -10,23 +10,28 @@ _BASE = """<!doctype html>
   <title>{title} · Owlet Dashboard</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <style>
-    :root {{ --bg:#f5f7fb; --panel:#fff; --text:#122033; --muted:#5b6b80; --purple:#6d28d9; }}
+    :root {{ --bg:#f5f7fb; --panel:#fff; --text:#122033; --muted:#5b6b80; --purple:#6d28d9;
+             --purple-hover:#5b21b6; --input-line:#d6dee9; --input-bg:#fbfcfe;
+             --notice-bg:#fef2f2; --notice-ink:#991b1b; --on-accent:#fff;
+             --shadow-card:0 8px 30px rgba(18,32,51,.08); --shadow-panel:0 12px 34px rgba(18,32,51,.08);
+             --radius-control:10px;
+             --font-sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }}
     * {{ box-sizing:border-box; }}
-    body {{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    body {{ margin:0; font-family:var(--font-sans);
            background:var(--bg); color:var(--text); display:flex; min-height:100vh;
            align-items:center; justify-content:center; padding:24px; }}
-    .card {{ background:var(--panel); border-radius:16px; box-shadow:0 8px 30px rgba(18,32,51,.08);
+    .card {{ background:var(--panel); border-radius:16px; box-shadow:var(--shadow-card);
             padding:32px; width:100%; max-width:420px; }}
     h1 {{ margin:0 0 4px; font-size:24px; }}
     p.sub {{ margin:0 0 20px; color:var(--muted); font-size:14px; }}
     label {{ display:block; font-size:13px; font-weight:600; margin:14px 0 4px; }}
     /* 16px minimum stops mobile Safari's forced zoom-on-focus */
-    input, select {{ width:100%; padding:10px 12px; border:1px solid #d6dee9; border-radius:10px; font-size:16px; }}
-    button {{ margin-top:18px; width:100%; padding:11px; border:0; border-radius:10px;
-             background:var(--purple); color:#fff; font-size:15px; font-weight:600; cursor:pointer; }}
+    input, select {{ width:100%; padding:10px 12px; border:1px solid var(--input-line); border-radius:var(--radius-control); font-size:16px; }}
+    button {{ margin-top:18px; width:100%; padding:11px; border:0; border-radius:var(--radius-control);
+             background:var(--purple); color:var(--on-accent); font-size:15px; font-weight:600; cursor:pointer; }}
     .links {{ margin-top:16px; font-size:13px; color:var(--muted); display:flex; justify-content:space-between; }}
     .links a {{ color:var(--purple); text-decoration:none; }}
-    .notice {{ background:#fef2f2; color:#991b1b; border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:8px; }}
+    .notice {{ background:var(--notice-bg); color:var(--notice-ink); border-radius:var(--radius-control); padding:10px 12px; font-size:13px; margin-bottom:8px; }}
     footer {{ margin-top:20px; font-size:11px; color:var(--muted); text-align:center; }}
   </style>
 </head>
@@ -86,9 +91,14 @@ _LAUNCHER = """<!doctype html>
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <style>
     :root {{ --bg:#f5f7fb; --panel:#fff; --text:#122033; --muted:#5b6b80; --purple:#6d28d9;
-             --purple-soft:#ede9fe; --line:#e3e9f2; }}
+             --purple-soft:#ede9fe; --line:#e3e9f2;
+             --purple-hover:#5b21b6; --input-line:#d6dee9; --input-bg:#fbfcfe;
+             --notice-bg:#fef2f2; --notice-ink:#991b1b; --on-accent:#fff;
+             --shadow-panel:0 12px 34px rgba(18,32,51,.08);
+             --radius-control:10px;
+             --font-sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }}
     * {{ box-sizing:border-box; margin:0; }}
-    body {{ font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    body {{ font-family:var(--font-sans);
       background:radial-gradient(1100px 500px at 15% -10%, var(--purple-soft), transparent 60%), var(--bg);
       color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px 20px; }}
     .wrap {{ width:100%; max-width:640px; }}
@@ -98,21 +108,21 @@ _LAUNCHER = """<!doctype html>
     h1 {{ font-size:26px; letter-spacing:-.02em; margin:14px 0 6px; }}
     .lede {{ color:var(--muted); font-size:15px; line-height:1.55; margin-bottom:22px; }}
     .opt {{ background:var(--panel); border:1px solid var(--line); border-radius:16px;
-      box-shadow:0 12px 34px rgba(18,32,51,.08); padding:20px 22px; margin-bottom:16px; }}
+      box-shadow:var(--shadow-panel); padding:20px 22px; margin-bottom:16px; }}
     .opt h2 {{ font-size:17px; margin-bottom:4px; }}
     .opt p {{ color:var(--muted); font-size:13.5px; line-height:1.5; margin-bottom:14px; }}
     .opt.primary {{ border:1.5px solid var(--purple); }}
-    input {{ width:100%; padding:11px 12px; border:1px solid #d6dee9; border-radius:10px;
-      font-size:16px; background:#fbfcfe; margin-bottom:10px; }}
+    input {{ width:100%; padding:11px 12px; border:1px solid var(--input-line); border-radius:var(--radius-control);
+      font-size:16px; background:var(--input-bg); margin-bottom:10px; }}
     input:focus {{ outline:2px solid var(--purple); outline-offset:1px; border-color:transparent; }}
-    button {{ width:100%; padding:12px; border:0; border-radius:10px; background:var(--purple);
-      color:#fff; font-size:15px; font-weight:600; cursor:pointer; }}
-    button:hover {{ background:#5b21b6; }}
+    button {{ width:100%; padding:12px; border:0; border-radius:var(--radius-control); background:var(--purple);
+      color:var(--on-accent); font-size:15px; font-weight:600; cursor:pointer; }}
+    button:hover {{ background:var(--purple-hover); }}
     button.ghost {{ background:transparent; color:var(--purple); border:1px solid var(--line); }}
     button.ghost:hover {{ background:var(--purple-soft); }}
     button[disabled] {{ opacity:.6; cursor:default; }}
     .alt {{ font-size:13px; color:var(--muted); margin-top:8px; text-align:center; }}
-    .notice {{ background:#fef2f2; color:#991b1b; border-radius:10px; padding:10px 12px;
+    .notice {{ background:var(--notice-bg); color:var(--notice-ink); border-radius:var(--radius-control); padding:10px 12px;
       font-size:13px; margin-bottom:10px; }}
     footer {{ text-align:center; font-size:11.5px; color:var(--muted); margin-top:14px; }}
   </style>
@@ -172,10 +182,16 @@ _LANDING = """<!doctype html>
       --night:#0b1023; --night-2:#232b5c; --ink-dark:#e8ecf8; --dim-dark:#9aa3c8;
       --line-dark:rgba(139,148,184,.28); --indigo:#a5b4fc; --accent:#4f46e5;
       --paper:#faf7f2; --ink:#1c1917; --dim:#78716c; --faint:#a8a29e; --line:#e7e0d5;
+      --brand-ink:#c7cdf0; --accent-hover:#4338ca; --field-bg:#fff; --on-accent:#fff;
+      --notice-bg:#fef2f2; --notice-ink:#991b1b; --muted:#5b6b80;
+      --shadow-shot:0 -10px 80px rgba(129,140,248,.22);
+      --radius-control:10px;
+      --font-sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      --font-serif:ui-serif,Georgia,'Times New Roman',serif;
     }}
     * {{ box-sizing:border-box; margin:0; }}
     body {{
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--ink);
+      font-family:var(--font-sans); color:var(--ink);
       min-height:100vh; display:grid; grid-template-columns:1.08fr .92fr;
     }}
     /* ---- left: the pitch ------------------------------------------------ */
@@ -187,11 +203,11 @@ _LANDING = """<!doctype html>
     }}
     .brand {{ display:flex; align-items:center; gap:11px; margin-bottom:40px; }}
     .brand img {{ width:32px; height:32px; border-radius:8px; }}
-    .brand span {{ font-size:14.5px; font-weight:650; color:#c7cdf0; letter-spacing:.01em; }}
+    .brand span {{ font-size:14.5px; font-weight:650; color:var(--brand-ink); letter-spacing:.01em; }}
     /* A system serif — editorial voice with no webfont to download, which
        keeps the self-hosted/offline story intact. */
     h1 {{
-      font-family:ui-serif,Georgia,'Times New Roman',serif; font-weight:500;
+      font-family:var(--font-serif); font-weight:500;
       font-size:clamp(32px,3.5vw,48px); line-height:1.05; letter-spacing:-.025em;
       max-width:13ch; margin-bottom:16px;
     }}
@@ -199,13 +215,13 @@ _LANDING = """<!doctype html>
     .lede {{ color:var(--dim-dark); font-size:16px; line-height:1.6; max-width:44ch;
             margin-bottom:24px; }}
     .pills {{ display:flex; flex-wrap:wrap; gap:8px; }}
-    .pills span {{ font-size:12.5px; color:#c7cdf0; border:1px solid var(--line-dark);
+    .pills span {{ font-size:12.5px; color:var(--brand-ink); border:1px solid var(--line-dark);
                   padding:6px 12px; border-radius:999px; }}
     /* the phone runs off the bottom edge — implies there is more below */
     .shot {{ margin:38px auto -2px; width:min(300px,78%); }}
     .shot img {{ width:100%; height:auto; display:block; border-radius:22px 22px 0 0;
                 border:1px solid var(--line-dark); border-bottom:0;
-                box-shadow:0 -10px 80px rgba(129,140,248,.22); }}
+                box-shadow:var(--shadow-shot); }}
     /* ---- right: sign in -------------------------------------------------- */
     .signin {{ background:var(--paper); display:flex; align-items:center;
               justify-content:center; padding:48px 44px; }}
@@ -215,15 +231,15 @@ _LANDING = """<!doctype html>
     label {{ display:block; font-size:12.5px; font-weight:650; margin:14px 0 5px; }}
     /* 16px minimum stops mobile Safari's forced zoom-on-focus */
     input {{ width:100%; padding:12px; border:1px solid var(--line); border-radius:11px;
-            font-size:16px; background:#fff; }}
+            font-size:16px; background:var(--field-bg); }}
     input:focus {{ outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }}
     button {{ margin-top:20px; width:100%; padding:13px; border:0; border-radius:11px;
-             background:var(--accent); color:#fff; font-size:15px; font-weight:650;
+             background:var(--accent); color:var(--on-accent); font-size:15px; font-weight:650;
              cursor:pointer; }}
-    button:hover {{ background:#4338ca; }}
+    button:hover {{ background:var(--accent-hover); }}
     .alt {{ margin-top:14px; font-size:13px; color:var(--dim); text-align:center; }}
     .alt a {{ color:var(--accent); font-weight:650; text-decoration:none; }}
-    .notice {{ background:#fef2f2; color:#991b1b; border-radius:10px; padding:10px 12px;
+    .notice {{ background:var(--notice-bg); color:var(--notice-ink); border-radius:var(--radius-control); padding:10px 12px;
               font-size:13px; margin-bottom:6px; }}
     .fine {{ margin-top:28px; padding-top:18px; border-top:1px solid var(--line);
             font-size:11.5px; color:var(--faint); line-height:1.55; }}
@@ -381,6 +397,6 @@ def onboarding_page(error: str | None = None, desktop_mode: bool = False) -> str
       <button type="submit">Link sock and start collecting</button>
     </form>
     <div class="links"><span></span><form method="post" action="/auth/logout" style="margin:0">
-      <button type="submit" style="background:none;color:#5b6b80;margin:0;padding:12px 10px;width:auto;min-height:44px;font-size:13px">
+      <button type="submit" style="background:none;color:var(--muted);margin:0;padding:12px 10px;width:auto;min-height:44px;font-size:13px">
         Sign out</button></form></div>""",
     )

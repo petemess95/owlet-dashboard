@@ -25,16 +25,16 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
       .range-seg button, .range-seg .rs-custom { font-size: 11px; padding: 4px 7px; }
     }
     .status-line b { color: var(--ink); font-weight: 600; }
-    .range-seg { display: flex; background: var(--accent-soft); border-radius: 999px;
+    .range-seg { display: flex; background: var(--accent-soft); border-radius: var(--radius-pill);
       padding: 3px; margin-left: auto; flex: 0 0 auto; }
     .range-seg button { all: unset; cursor: pointer; font-size: 12px; font-weight: 600;
-      color: var(--dim); padding: 5px 11px; border-radius: 999px;
+      color: var(--dim); padding: 5px 11px; border-radius: var(--radius-pill);
       font-variant-numeric: tabular-nums; }
     .range-seg button.active { background: var(--surface); color: var(--accent);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, .12); }
+      box-shadow: var(--shadow-lift); }
     .range-seg .rs-custom { font-size: 12px; font-weight: 600; color: var(--accent);
-      background: var(--surface); padding: 5px 11px; border-radius: 999px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, .12); }
+      background: var(--surface); padding: 5px 11px; border-radius: var(--radius-pill);
+      box-shadow: var(--shadow-lift); }
     .range-seg .rs-custom[hidden] { display: none; }
     .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
     @media (max-width: 640px) { .hero { grid-template-columns: 1fr; } }
@@ -102,18 +102,18 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
     .vital-expand:hover { color: var(--accent); background: var(--accent-soft); }
     .vital-o2toggle { all: unset; position: absolute; top: 10px; right: 44px; z-index: 2;
       cursor: pointer; font-size: 11px; font-weight: 700; padding: 6px 10px;
-      border-radius: 999px; color: var(--faint); border: 1px solid var(--surface-line);
+      border-radius: var(--radius-pill); color: var(--faint); border: 1px solid var(--surface-line);
       line-height: 1; transition: color .35s ease, background-color .35s ease,
       border-color .35s ease; }
     .vital-o2toggle:hover { color: var(--accent); border-color: var(--accent); }
     .vital-o2toggle.on { color: var(--o2-on); background: color-mix(in srgb, var(--o2-on) 12%, transparent);
       border-color: color-mix(in srgb, var(--o2-on) 40%, transparent); }
-    .vital-o2toggle.arming { color: #fff; background: var(--accent);
+    .vital-o2toggle.arming { color: var(--on-accent); background: var(--accent);
       border-color: var(--accent); }
     .vital.placing { outline: 2px solid var(--accent); outline-offset: -1px; }
     .place-hint { position: absolute; left: 50%; top: 44px; transform: translateX(-50%);
-      z-index: 3; background: var(--accent); color: #fff; font-size: 11px;
-      font-weight: 600; padding: 5px 12px; border-radius: 999px; white-space: nowrap;
+      z-index: 3; background: var(--accent); color: var(--on-accent); font-size: 11px;
+      font-weight: 600; padding: 5px 12px; border-radius: var(--radius-pill); white-space: nowrap;
       pointer-events: none; }
     .place-hint[hidden] { display: none; }
 
@@ -124,13 +124,13 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
       font-variant-numeric: tabular-nums; }
     .ms-value small { font-size: 14px; color: var(--dim); font-weight: 500; }
     .ms-when { color: var(--dim); font-size: 12px; text-align: right; }
-    .ms-seg { display: flex; background: var(--accent-soft); border-radius: 999px;
+    .ms-seg { display: flex; background: var(--accent-soft); border-radius: var(--radius-pill);
       padding: 3px; margin-bottom: 12px; }
     .ms-seg button { all: unset; flex: 1; text-align: center; cursor: pointer;
       font-size: 12px; font-weight: 600; color: var(--dim); padding: 5px 0;
-      border-radius: 999px; }
+      border-radius: var(--radius-pill); }
     .ms-seg button.active { background: var(--surface); color: var(--accent);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, .12); }
+      box-shadow: var(--shadow-lift); }
     .ms-chartwrap { position: relative; touch-action: pan-y; user-select: none;
       -webkit-user-select: none; cursor: crosshair; }
     .ms-chartwrap svg { display: block; width: 100%; height: 150px; }
@@ -168,7 +168,7 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
     .timescale .live-chip { all: unset; font-size: 11px; color: var(--faint);
       letter-spacing: .04em; }
     .timescale .live-chip.paused { cursor: pointer; color: var(--accent);
-      background: var(--accent-soft); padding: 3px 11px; border-radius: 999px;
+      background: var(--accent-soft); padding: 3px 11px; border-radius: var(--radius-pill);
       font-weight: 700; }
     .strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
       gap: 12px; margin-bottom: 26px; }
@@ -204,21 +204,21 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
     .prep-facts b { color: var(--ink); font-variant-numeric: tabular-nums; }
     .prep-note { font-size: 13px; color: var(--dim); line-height: 1.5; margin: 10px 0 0; }
     .prep-feed-btn { font: inherit; font-size: 12px; font-weight: 600; color: var(--accent);
-      background: var(--accent-soft); border: 0; border-radius: 999px; padding: 2px 10px;
+      background: var(--accent-soft); border: 0; border-radius: var(--radius-pill); padding: 2px 10px;
       margin-left: 6px; cursor: pointer; }
     .prep-feed-btn:hover { filter: brightness(.96); }
     .empty { text-align: center; color: var(--dim); padding: 80px 20px; font-size: 15px; }
 
     /* ---- detail sheet ---------------------------------------------------- */
     .sheet-backdrop { position: fixed; inset: 0; z-index: 80;
-      background: rgba(10, 12, 30, .45); display: flex; align-items: center;
+      background: var(--scrim); display: flex; align-items: center;
       justify-content: center; padding: 20px; }
     .sheet-backdrop[hidden] { display: none; }
     .sheet { width: min(460px, 100%); max-height: min(72vh, 620px); overflow-y: auto;
       padding: 20px 22px 22px; }
     @media (max-width: 640px) {
       .sheet-backdrop { align-items: flex-end; padding: 0; }
-      .sheet { width: 100%; max-height: 80vh; border-radius: 18px 18px 0 0;
+      .sheet { width: 100%; max-height: 80vh; border-radius: var(--radius-card) var(--radius-card) 0 0;
         padding-bottom: calc(22px + env(safe-area-inset-bottom)); }
     }
     .sheet header { display: flex; align-items: center; justify-content: space-between;
@@ -261,7 +261,7 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
       background: linear-gradient(to right, var(--accent-soft), var(--accent)); }
     .feed-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px;
       border-radius: 50%; background: var(--surface); border: 2.5px solid var(--accent);
-      margin-top: -8px; box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+      margin-top: -8px; box-shadow: var(--shadow-thumb); }
     .feed-slider::-moz-range-track { height: 6px; border-radius: 3px;
       background: linear-gradient(to right, var(--accent-soft), var(--accent)); }
     .feed-slider::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%;
@@ -289,7 +289,7 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
       color: var(--accent); background: var(--accent-soft); }
     .o2-action { all: unset; box-sizing: border-box; display: block; width: 100%;
       text-align: center; cursor: pointer; padding: 12px 0;
-      border-radius: var(--radius-control); background: var(--accent); color: #fff;
+      border-radius: var(--radius-control); background: var(--accent); color: var(--on-accent);
       font-size: 14px; font-weight: 700; }
     .o2-action.stop { background: transparent; color: var(--bad);
       border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); }

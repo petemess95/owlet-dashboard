@@ -32,6 +32,48 @@
   --radius-card: 18px;
   --radius-control: 10px;
   --nav-bg: rgba(250, 247, 242, .82);
+  --series-temp: #0f766e;
+  --surface-opaque: #ffffff;
+  /* ---- token audit (v0.2 V1): values that used to be literals in page
+     modules. Identical in both themes today; defined in each block so a
+     later re-colour can change one skin without the other. ---- */
+  --on-accent: #fff;
+  --scrim: rgba(10, 12, 30, .45);
+  --shadow-lift: 0 2px 8px rgba(0, 0, 0, .12);
+  --shadow-thumb: 0 1px 4px rgba(0, 0, 0, .18);
+  --radius-pill: 999px;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* night-sky dots on the Tonight page */
+  --star-bright: #fff;
+  --star-dim: #cdd6ff;
+  /* header status dot: fresh -> idle -> stale (read by JS, hex only) */
+  --live-fresh: #10dc60;
+  --live-idle: #94a3b8;
+  --live-stale: #ef4444;
+  --live-notreporting: #f59e0b;
+  /* Data page chart chrome (read by JS at draw time) */
+  --chart-phase-light: rgba(124, 58, 237, .21);
+  --chart-phase-deep: rgba(37, 99, 235, .21);
+  --chart-phase-awake: rgba(180, 83, 9, .20);
+  --chart-phase-inactive: rgba(148, 163, 184, .16);
+  --chart-phase-offline: rgba(100, 116, 139, .18);
+  --chart-strip-light: rgba(124, 58, 237, .72);
+  --chart-strip-deep: rgba(37, 99, 235, .72);
+  --chart-strip-awake: rgba(180, 83, 9, .72);
+  --chart-strip-inactive: rgba(148, 163, 184, .72);
+  --chart-strip-offline: rgba(100, 116, 139, .48);
+  --chart-offline-fill: rgba(100, 116, 139, .14);
+  --chart-offline-line: rgba(100, 116, 139, .32);
+  --chart-nodata-fill: rgba(148, 163, 184, .10);
+  --chart-nodata-line: rgba(100, 116, 139, .22);
+  --chart-nodata-text: rgba(71, 85, 105, .78);
+  --chart-challenge-fill: rgba(37, 99, 235, .13);
+  --chart-challenge-fill-trend: rgba(37, 99, 235, .10);
+  --chart-challenge-line: rgba(29, 78, 216, .62);
+  --chart-challenge-line-trend: rgba(29, 78, 216, .78);
+  --chart-day-boundary: rgba(15, 23, 42, .38);
 }
 
 :root[data-theme="dark"] {
@@ -57,12 +99,54 @@
   --series-hr: #e879f9;
   --shadow: 0 12px 34px rgba(0, 0, 0, .3);
   --nav-bg: rgba(11, 16, 35, .78);
+  --series-temp: #2dd4bf;
+  --surface-opaque: #171d3d;
+  /* ---- token audit (v0.2 V1): values that used to be literals in page
+     modules. Identical in both themes today; defined in each block so a
+     later re-colour can change one skin without the other. ---- */
+  --on-accent: #fff;
+  --scrim: rgba(10, 12, 30, .45);
+  --shadow-lift: 0 2px 8px rgba(0, 0, 0, .12);
+  --shadow-thumb: 0 1px 4px rgba(0, 0, 0, .18);
+  --radius-pill: 999px;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* night-sky dots on the Tonight page */
+  --star-bright: #fff;
+  --star-dim: #cdd6ff;
+  /* header status dot: fresh -> idle -> stale (read by JS, hex only) */
+  --live-fresh: #10dc60;
+  --live-idle: #94a3b8;
+  --live-stale: #ef4444;
+  --live-notreporting: #f59e0b;
+  /* Data page chart chrome (read by JS at draw time) */
+  --chart-phase-light: rgba(124, 58, 237, .21);
+  --chart-phase-deep: rgba(37, 99, 235, .21);
+  --chart-phase-awake: rgba(180, 83, 9, .20);
+  --chart-phase-inactive: rgba(148, 163, 184, .16);
+  --chart-phase-offline: rgba(100, 116, 139, .18);
+  --chart-strip-light: rgba(124, 58, 237, .72);
+  --chart-strip-deep: rgba(37, 99, 235, .72);
+  --chart-strip-awake: rgba(180, 83, 9, .72);
+  --chart-strip-inactive: rgba(148, 163, 184, .72);
+  --chart-strip-offline: rgba(100, 116, 139, .48);
+  --chart-offline-fill: rgba(100, 116, 139, .14);
+  --chart-offline-line: rgba(100, 116, 139, .32);
+  --chart-nodata-fill: rgba(148, 163, 184, .10);
+  --chart-nodata-line: rgba(100, 116, 139, .22);
+  --chart-nodata-text: rgba(71, 85, 105, .78);
+  --chart-challenge-fill: rgba(37, 99, 235, .13);
+  --chart-challenge-fill-trend: rgba(37, 99, 235, .10);
+  --chart-challenge-line: rgba(29, 78, 216, .62);
+  --chart-challenge-line-trend: rgba(29, 78, 216, .78);
+  --chart-day-boundary: rgba(15, 23, 42, .38);
 }
 
 /* ---- base ------------------------------------------------------------- */
 body.themed {
   margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   color: var(--ink);
   min-height: 100vh;
   background:
@@ -80,7 +164,7 @@ body.themed * { box-sizing: border-box; }
 }
 :root[data-theme="dark"] .card { backdrop-filter: blur(14px); }
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-theme="dark"] .card { backdrop-filter: none; background: #171d3d; }
+  :root[data-theme="dark"] .card { backdrop-filter: none; background: var(--surface-opaque); }
 }
 
 .numeric { font-variant-numeric: tabular-nums; }
@@ -113,7 +197,7 @@ body.themed * { box-sizing: border-box; }
 }
 .shell-tabs { display: flex; gap: 4px; }
 .shell-tabs a {
-  padding: 7px 15px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
+  padding: 7px 15px; border-radius: var(--radius-pill); font-size: 13.5px; font-weight: 600;
   color: var(--dim); text-decoration: none;
 }
 .shell-tabs a:hover { color: var(--ink); }
@@ -121,10 +205,10 @@ body.themed * { box-sizing: border-box; }
 .shell-side { display: flex; align-items: center; gap: 10px; position: relative; }
 .bell-wrap { position: relative; display: inline-flex; }
 .shell-bell { all: unset; cursor: pointer; position: relative; width: 34px; height: 34px;
-  display: inline-grid; place-items: center; border-radius: 999px; color: var(--dim); }
+  display: inline-grid; place-items: center; border-radius: var(--radius-pill); color: var(--dim); }
 .shell-bell:hover { background: var(--accent-soft); color: var(--accent); }
 .bell-badge { position: absolute; top: 0; right: -1px; min-width: 15px; height: 15px;
-  padding: 0 4px; border-radius: 999px; background: var(--bad); color: #fff;
+  padding: 0 4px; border-radius: var(--radius-pill); background: var(--bad); color: var(--on-accent);
   font-size: 9.5px; font-weight: 700; display: inline-grid; place-items: center;
   line-height: 1; font-variant-numeric: tabular-nums; }
 .bell-badge[hidden] { display: none; }
@@ -163,7 +247,7 @@ body.themed * { box-sizing: border-box; }
 
 .batt-wrap { position: relative; display: inline-flex; }
 .shell-batt { all: unset; cursor: pointer; display: inline-flex; align-items: center;
-  gap: 6px; height: 34px; padding: 0 8px; border-radius: 999px; color: var(--dim); }
+  gap: 6px; height: 34px; padding: 0 8px; border-radius: var(--radius-pill); color: var(--dim); }
 .shell-batt:hover { background: var(--accent-soft); }
 .batt-shell { width: 22px; height: 12px; border: 1.5px solid currentColor; border-radius: 3.5px;
   padding: 1.5px; position: relative; display: inline-flex; align-items: stretch; }
@@ -199,7 +283,7 @@ body.themed * { box-sizing: border-box; }
 @media (max-width: 420px) { .batt-pct { display: none; } .shell-batt { padding: 0 6px; } }
 
 /* focus modal: quick zoom on one moment, app-wide */
-.focus-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(10, 12, 30, .45);
+.focus-backdrop { position: fixed; inset: 0; z-index: 90; background: var(--scrim);
   display: flex; align-items: center; justify-content: center; padding: 18px; }
 .focus-backdrop[hidden] { display: none; }
 .focus-sheet { width: min(560px, 100%); max-height: min(82vh, 640px); overflow-y: auto;
@@ -219,7 +303,7 @@ body.themed * { box-sizing: border-box; }
   padding: 4px 0 18px; border-right: 1px solid var(--surface-line); }
 .set-rail button { display: flex; align-items: center; gap: 10px; font: inherit;
   font-size: 13px; font-weight: 600; color: var(--dim); cursor: pointer;
-  background: none; border: 0; border-radius: 10px; padding: 9px 12px;
+  background: none; border: 0; border-radius: var(--radius-control); padding: 9px 12px;
   margin-right: 14px; text-align: left; }
 .set-rail button svg { width: 16px; height: 16px; flex: none; color: var(--faint); }
 .set-rail button:hover { color: var(--ink); background: color-mix(in srgb, var(--surface-line) 40%, transparent); }
@@ -240,7 +324,7 @@ body.themed * { box-sizing: border-box; }
 .set-pane { display: none; }
 .set-pane.active { display: block; animation: pane-in .18s ease; }
 @keyframes pane-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.set-pane h3 { font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+.set-pane h3 { font-family: var(--font-serif);
   font-size: 23px; font-weight: 600; letter-spacing: -0.01em; margin: 2px 0 4px; }
 .set-lede { font-size: 13px; color: var(--dim); line-height: 1.5; margin: 0 0 6px;
   max-width: 46ch; }
@@ -310,7 +394,7 @@ body.themed * { box-sizing: border-box; }
   color: var(--faint); margin-top: 4px; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) {
   .focus-backdrop { align-items: flex-end; padding: 0; }
-  .focus-sheet, .settings-sheet, .install-sheet { width: 100%; border-radius: 18px 18px 0 0;
+  .focus-sheet, .settings-sheet, .install-sheet { width: 100%; border-radius: var(--radius-card) var(--radius-card) 0 0;
     padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
 }
 
@@ -328,7 +412,7 @@ body.themed * { box-sizing: border-box; }
 .install-opt > p { font-size: 13px; color: var(--dim); line-height: 1.5; margin: 0 0 10px; }
 .install-cta { all: unset; box-sizing: border-box; cursor: pointer; display: inline-block;
   text-align: center; padding: 9px 16px; border-radius: var(--radius-control);
-  background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; text-decoration: none; }
+  background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600; text-decoration: none; }
 .install-cta:hover { filter: brightness(1.07); }
 .install-hint { font-size: 12.5px; color: var(--dim); line-height: 1.6; margin: 10px 0 0; }
 .install-modes { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
@@ -361,9 +445,9 @@ body.themed * { box-sizing: border-box; }
 .focus-marker { position: absolute; top: 0; bottom: 0; width: 0; pointer-events: none;
   border-left: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
 .focus-marker span { position: absolute; top: -2px; left: 0; transform: translateX(-50%);
-  background: var(--accent); color: #fff; font-size: 9px; font-weight: 700;
+  background: var(--accent); color: var(--on-accent); font-size: 9px; font-weight: 700;
   letter-spacing: .05em; text-transform: uppercase; padding: 2px 7px;
-  border-radius: 999px; white-space: nowrap; max-width: 200px; overflow: hidden;
+  border-radius: var(--radius-pill); white-space: nowrap; max-width: 200px; overflow: hidden;
   text-overflow: ellipsis; }
 .focus-axis { display: flex; justify-content: space-between; color: var(--faint);
   font-size: 10.5px; margin-top: 4px; font-variant-numeric: tabular-nums; }
@@ -394,13 +478,13 @@ body.themed * { box-sizing: border-box; }
 }
 .profile-chip {
   all: unset; cursor: pointer; display: flex; align-items: center; gap: 9px;
-  padding: 4px 10px 4px 5px; border-radius: 999px;
+  padding: 4px 10px 4px 5px; border-radius: var(--radius-pill);
   background: var(--accent-soft);
 }
 .profile-chip:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
 .profile-chip .pc-avatar {
   width: 30px; height: 30px; border-radius: 50%; flex: 0 0 auto;
-  background: var(--accent); color: #fff; font-weight: 700; font-size: 12px;
+  background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 12px;
   display: flex; align-items: center; justify-content: center; letter-spacing: .01em;
 }
 .profile-chip .pc-labels { display: grid; line-height: 1.15; text-align: left; }
@@ -436,7 +520,7 @@ body.themed * { box-sizing: border-box; }
 .desktop-notice b { color: var(--ink); }
 .desktop-notice button { all: unset; cursor: pointer; flex: none; margin-left: auto;
   font-size: 12px; font-weight: 700; color: var(--accent); padding: 4px 10px;
-  border-radius: 999px; background: var(--accent-soft); }
+  border-radius: var(--radius-pill); background: var(--accent-soft); }
 .pp-section select, .pp-section input {
   width: 100%; padding: 8px 10px; border: 1px solid var(--surface-line);
   border-radius: var(--radius-control); background: var(--surface); color: var(--ink);
@@ -444,7 +528,7 @@ body.themed * { box-sizing: border-box; }
 }
 .pp-link-btn {
   all: unset; cursor: pointer; padding: 8px 13px; border-radius: var(--radius-control);
-  background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 700;
+  background: var(--accent); color: var(--on-accent); font-size: 12.5px; font-weight: 700;
 }
 .pp-toggle { display: flex; align-items: center; justify-content: space-between;
   gap: 10px; padding: 10px 12px; border: 1px solid var(--surface-line);
@@ -484,13 +568,13 @@ body.themed * { box-sizing: border-box; }
 }
 .pp-section { margin-bottom: 16px; }
 .pp-section.hidden { display: none; }
-.pp-seg { display: flex; background: var(--accent-soft); border-radius: 999px; padding: 3px; }
+.pp-seg { display: flex; background: var(--accent-soft); border-radius: var(--radius-pill); padding: 3px; }
 .pp-seg button {
   all: unset; flex: 1; text-align: center; cursor: pointer; font-size: 12.5px;
-  font-weight: 600; color: var(--dim); padding: 6px 0; border-radius: 999px;
+  font-weight: 600; color: var(--dim); padding: 6px 0; border-radius: var(--radius-pill);
 }
 .pp-seg button.active { background: var(--surface); color: var(--accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .12); }
+  box-shadow: var(--shadow-lift); }
 .pp-signout { margin: 0; }
 .pp-signout button {
   all: unset; cursor: pointer; display: block; width: 100%; text-align: center;
