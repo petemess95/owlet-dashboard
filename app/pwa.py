@@ -35,7 +35,7 @@ MANIFEST = {
 }
 
 SERVICE_WORKER_JS = """
-const CACHE_NAME = 'owlet-dashboard-v3';
+const CACHE_NAME = 'owlet-dashboard-v4';
 // Only truly immutable assets are safe to serve cache-first. Styles and
 // scripts change with every release, so they go network-first below —
 // otherwise one stale theme.css leaves the app half-styled until the
@@ -46,7 +46,12 @@ const IMMUTABLE = [
   '/icon-180.png',
   '/icon-192.png',
   '/icon-512.png',
-  '/logo.svg'
+  '/logo.svg',
+  '/fonts/source-sans-3-latin-400-normal.woff2',
+  '/fonts/source-sans-3-latin-600-normal.woff2',
+  '/fonts/source-sans-3-latin-700-normal.woff2',
+  '/fonts/source-serif-4-latin-400-normal.woff2',
+  '/fonts/source-serif-4-latin-600-normal.woff2'
 ];
 
 self.addEventListener('install', event => {

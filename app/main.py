@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -55,6 +56,7 @@ from app.store import ReadingStore
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 STATIC_DIR = FilePath(__file__).parent / "static"
+_FONT_NAME = re.compile(r"[a-z0-9-]+\.woff2")
 JSON_BODY = Body(default_factory=dict)
 
 
@@ -388,6 +390,16 @@ def create_app(
         return FileResponse(
             STATIC_DIR / "logo.svg",
             media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @app.get("/fonts/{name}")
+    async def bundled_font(name: str) -> FileResponse:
+        if not _FONT_NAME.fullmatch(name) or not (STATIC_DIR / "fonts" / name).is_file():
+            raise HTTPException(status_code=404)
+        return FileResponse(
+            STATIC_DIR / "fonts" / name,
+            media_type="font/woff2",
             headers={"Cache-Control": "public, max-age=86400"},
         )
 

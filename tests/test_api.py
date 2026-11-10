@@ -841,7 +841,7 @@ async def test_pwa_assets_are_served(tmp_path):
     assert {icon["sizes"] for icon in payload["icons"]} >= {"32x32", "192x192", "512x512"}
     assert worker.status_code == 200
     assert "CACHE_NAME" in worker.text
-    assert "owlet-dashboard-v3" in worker.text
+    assert "owlet-dashboard-v4" in worker.text
     assert "networkFirst" in worker.text     # styles/scripts/navigations must not be served cache-first
     assert "/favicon.ico" in worker.text
     assert "/logo.svg" in worker.text
@@ -854,6 +854,38 @@ async def test_pwa_assets_are_served(tmp_path):
         assert icon.status_code == 200
         assert icon.headers["content-type"] == "image/png"
         assert icon.content.startswith(b"\x89PNG")
+
+
+@pytest.mark.asyncio
+async def test_bundled_fonts_are_served_and_precached(tmp_path):
+    store = ReadingStore(tmp_path / "owlet.sqlite3")
+    auth = AuthStore(store.db_path)
+    user, session = await make_user(auth, "owner@example.test")
+    app = create_app(store=store, settings=_test_settings(), start_poller=False, auth_store=auth)
+    font_files = [
+        "source-sans-3-latin-400-normal.woff2",
+        "source-sans-3-latin-600-normal.woff2",
+        "source-sans-3-latin-700-normal.woff2",
+        "source-serif-4-latin-400-normal.woff2",
+        "source-serif-4-latin-600-normal.woff2",
+    ]
+
+    with client_for(app, session) as client:
+        font = client.get(f"/fonts/{font_files[0]}")
+        missing = client.get("/fonts/nope.woff2")
+        licence = client.get("/fonts/LICENSE-SourceSans3.txt")
+        traversal = client.get("/fonts/..%2Ftheme.css")
+        worker = client.get("/sw.js")
+
+    assert font.status_code == 200
+    assert font.headers["content-type"] == "font/woff2"
+    assert font.content.startswith(b"wOF2")
+    assert missing.status_code == 404
+    assert licence.status_code == 404
+    assert traversal.status_code == 404
+    assert "owlet-dashboard-v4" in worker.text
+    for name in font_files:
+        assert f"/fonts/{name}" in worker.text
 
 
 @pytest.mark.asyncio
