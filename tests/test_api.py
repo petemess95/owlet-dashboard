@@ -1652,3 +1652,178 @@ async def test_poller_stop_is_bounded_when_read_hangs():
 
     # let the shielded task unwind so it doesn't leak into other tests
     await asyncio.sleep(2.5)
+
+
+# ---- /api/widget-series ----------------------------------------------------------
+
+
+def _ago(**delta) -> str:
+    return (datetime.now(timezone.utc) - timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+async def _series_setup(tmp_path, email="owner@example.test"):
+    store = ReadingStore(tmp_path / "owlet.sqlite3")
+    await store.init()
+    auth = AuthStore(store.db_path)
+    user, session = await make_user(auth, email)
+    app = create_app(store=store, settings=_test_settings(), start_poller=False, auth_store=auth)
+    return store, auth, user, session, app
+
+
+@pytest.mark.asyncio
+async def test_widget_series_requires_login(tmp_path):
+    *_, app = await _series_setup(tmp_path)
+    with client_for(app) as client:
+        assert client.get("/api/widget-series").status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_widget_series_window_order_format_and_skips(tmp_path):
+    store, _, user, session, app = await _series_setup(tmp_path)
+    account = await store.create_account(email="sock@x.y", user_id=user["id"])
+    aid = account["id"]
+    await _seed_reading(store, _ago(minutes=20), spo2=91, account_id=aid)  # outside window
+    await _seed_reading(store, _ago(minutes=8), spo2=95, account_id=aid)
+    await _seed_reading(store, _ago(minutes=6), spo2=0, account_id=aid)  # sock off
+    await _seed_reading(store, _ago(minutes=4), spo2=None, account_id=aid)
+    await _seed_reading(store, _ago(minutes=2), spo2=97, account_id=aid)
+    await _seed_reading(store, _ago(minutes=3), spo2=96, account_id=aid, device_serial="OTHER")
+
+    with client_for(app, session) as client:
+        body = client.get("/api/widget-series?minutes=10").json()
+    assert body["device_serial"] == "AC123"
+    assert [p["spo2"] for p in body["points"]] == [95, 97]
+    assert all(isinstance(p["spo2"], int) for p in body["points"])
+    times = [p["t"] for p in body["points"]]
+    assert times == sorted(times)
+    assert all(t.endswith("Z") and len(t) == 20 for t in times)
+    assert set(body) == {"device_serial", "warn_threshold", "critical_threshold", "points"}
+
+
+@pytest.mark.asyncio
+async def test_widget_series_minutes_default_and_clamping(tmp_path):
+    store, _, user, session, app = await _series_setup(tmp_path)
+    account = await store.create_account(email="sock@x.y", user_id=user["id"])
+    for m in (0.5, 5, 30, 59, 90):
+        await _seed_reading(store, _ago(minutes=m), account_id=account["id"], spo2=95)
+
+    def count(client, query):
+        return len(client.get(f"/api/widget-series{query}").json()["points"])
+
+    with client_for(app, session) as client:
+        assert count(client, "") == 2  # default 10 minutes
+        assert count(client, "?minutes=0") == 1  # clamped to 1
+        assert count(client, "?minutes=-5") == 1
+        assert count(client, "?minutes=500") == 4  # clamped to 60
+        assert client.get("/api/widget-series?minutes=abc").status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_widget_series_prefers_alerting_device_then_most_recent(tmp_path):
+    import time
+
+    from app.alerts import ALERTS
+    from app.models import OwletReading
+
+    store, _, user, session, app = await _series_setup(tmp_path)
+    account = await store.create_account(email="sock@x.y", user_id=user["id"])
+    aid = account["id"]
+    await _seed_reading(store, _ago(minutes=5), spo2=80, device_serial="ALERTING", account_id=aid)
+    await _seed_reading(store, _ago(minutes=1), spo2=97, device_serial="FRESH", account_id=aid)
+
+    ALERTS.reset()
+    try:
+        with client_for(app, session) as client:
+            # Nothing alerting: the most recently reporting device.
+            assert client.get("/api/widget-series").json()["device_serial"] == "FRESH"
+
+            now = datetime.now(timezone.utc)
+            for i in range(3):
+                ALERTS.observe(
+                    aid, "Baby",
+                    OwletReading(device_serial="ALERTING", recorded_at=now + timedelta(seconds=i),
+                                 oxygen_saturation=80, heart_rate=130),
+                    90, 86, time.time(),
+                )
+            before = client.get("/api/alert-state").json()
+            assert before["level"] == "red"
+            body = client.get("/api/widget-series").json()
+            after = client.get("/api/alert-state").json()
+        assert body["device_serial"] == "ALERTING"
+        assert [p["spo2"] for p in body["points"]] == [80]
+        # read-only: no snooze / ack side effects
+        assert (before["snoozed"], before["acknowledged"]) == (False, False)
+        assert (after["snoozed"], after["acknowledged"]) == (False, False)
+    finally:
+        ALERTS.reset()
+
+
+@pytest.mark.asyncio
+async def test_widget_series_ignores_test_alert_device(tmp_path):
+    from app.alerts import ALERTS
+
+    store, _, user, session, app = await _series_setup(tmp_path)
+    account = await store.create_account(email="sock@x.y", user_id=user["id"])
+    await _seed_reading(store, _ago(minutes=1), spo2=97, account_id=account["id"])
+    ALERTS.reset()
+    try:
+        with client_for(app, session) as client:
+            assert client.post("/api/alert/test", json={"level": "red", "seconds": 60}).status_code == 200
+            body = client.get("/api/widget-series").json()
+        assert body["device_serial"] == "AC123"
+    finally:
+        ALERTS.reset()
+
+
+@pytest.mark.asyncio
+async def test_widget_series_thresholds_come_from_chosen_account(tmp_path):
+    store, _, user, session, app = await _series_setup(tmp_path)
+    a = await store.create_account(email="a@x.y", user_id=user["id"])
+    b = await store.create_account(email="b@x.y", user_id=user["id"])
+    await _seed_reading(store, _ago(minutes=5), spo2=97, device_serial="DEVA", account_id=a["id"])
+    await _seed_reading(store, _ago(minutes=1), spo2=97, device_serial="DEVB", account_id=b["id"])
+
+    with client_for(app, session) as client:
+        client.patch(
+            f"/api/accounts/{a['id']}",
+            json={"dashboard_preferences": {"o2_warn_threshold": 94, "o2_critical_threshold": 88}},
+        )
+        client.patch(
+            f"/api/accounts/{b['id']}",
+            json={"dashboard_preferences": {"o2_warn_threshold": 92, "o2_critical_threshold": 85}},
+        )
+        body = client.get("/api/widget-series").json()
+    assert body["device_serial"] == "DEVB"
+    assert (body["warn_threshold"], body["critical_threshold"]) == (92, 85)
+
+
+@pytest.mark.asyncio
+async def test_widget_series_no_readings_returns_defaults(tmp_path):
+    from app.analytics import DEFAULT_O2_CRITICAL, DEFAULT_O2_WARN
+
+    store, _, user, session, app = await _series_setup(tmp_path)
+    await store.create_account(email="sock@x.y", user_id=user["id"])
+    with client_for(app, session) as client:
+        body = client.get("/api/widget-series").json()
+    assert body == {
+        "device_serial": None,
+        "warn_threshold": DEFAULT_O2_WARN,
+        "critical_threshold": DEFAULT_O2_CRITICAL,
+        "points": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_widget_series_is_user_scoped(tmp_path):
+    store, auth, alice, alice_session, app = await _series_setup(tmp_path, "alice@example.test")
+    bob, bob_session = await make_user(auth, "bob@example.test")
+    alice_acct = await store.create_account(email="a@x.y", user_id=alice["id"])
+    bob_acct = await store.create_account(email="b@x.y", user_id=bob["id"])
+    await _seed_reading(store, _ago(minutes=1), spo2=91, device_serial="ALICE1", account_id=alice_acct["id"])
+    await _seed_reading(store, _ago(minutes=1), spo2=99, device_serial="BOB1", account_id=bob_acct["id"])
+
+    with client_for(app, alice_session) as a, client_for(app, bob_session) as b:
+        sa = a.get("/api/widget-series").json()
+        sb = b.get("/api/widget-series").json()
+    assert (sa["device_serial"], [p["spo2"] for p in sa["points"]]) == ("ALICE1", [91])
+    assert (sb["device_serial"], [p["spo2"] for p in sb["points"]]) == ("BOB1", [99])

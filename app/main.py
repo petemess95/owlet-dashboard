@@ -1096,6 +1096,71 @@ def create_app(
             snooze_seconds=await _snooze_seconds_for(user, ids),
         )
 
+    @app.get("/api/widget-series")
+    async def widget_series(
+        minutes: int = Query(default=10),
+        user: dict = Depends(require_user),
+    ):
+        minutes = max(1, min(60, minutes))
+        ids = await _scope(user, None)
+        accounts = {int(a["id"]): a for a in await store.list_accounts(user_id=user["id"])}
+
+        # Read-only: same call /api/alert-state makes on every poll.
+        alert = ALERTS.state(
+            user["id"], ids, bool(state.get("pollers")), time.time(),
+            remote_mode=is_remote_mode(),
+            snooze_seconds=await _snooze_seconds_for(user, ids),
+        )
+        chosen: tuple[int, str] | None = None
+        for wanted in ("red", "amber"):
+            for dev in alert["devices"]:
+                if (
+                    dev.get("level") == wanted
+                    and dev.get("device_serial") != "TEST"
+                    and int(dev.get("account_id") or 0) in accounts
+                ):
+                    chosen = (int(dev["account_id"]), str(dev["device_serial"]))
+                    break
+            if chosen:
+                break
+        if chosen is None:
+            chosen = await store.latest_reading_device(ids)
+        if chosen is None:
+            warn, critical = resolve_o2_thresholds(None)
+            return {
+                "device_serial": None,
+                "warn_threshold": warn,
+                "critical_threshold": critical,
+                "points": [],
+            }
+
+        account_id, serial = chosen
+        warn, critical = resolve_o2_thresholds(accounts[account_id].get("dashboard_preferences"))
+        since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        rows = await store.get_spo2_series(
+            account_id=account_id, device_serial=serial, since=since, limit=60 * 60
+        )
+        points = []
+        for recorded_at, spo2 in rows:
+            try:
+                moment = datetime.fromisoformat(recorded_at)
+            except ValueError:
+                continue
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            points.append(
+                {
+                    "t": moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "spo2": int(round(spo2)),
+                }
+            )
+        return {
+            "device_serial": serial,
+            "warn_threshold": warn,
+            "critical_threshold": critical,
+            "points": points,
+        }
+
     @app.post("/api/alert/snooze")
     async def alert_snooze(user: dict = Depends(require_user)):
         ids = await _scope(user, None)

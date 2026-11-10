@@ -840,6 +840,52 @@ class ReadingStore:
 
         return [self._row_to_reading(row) for row in reversed(rows)]
 
+    async def latest_reading_device(self, account_ids: list[int]) -> tuple[int, str] | None:
+        """(account_id, device_serial) of the newest reading in these accounts."""
+        await self.init()
+        if not account_ids:
+            return None
+        placeholders = ",".join("?" for _ in account_ids)
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"""
+                SELECT account_id, device_serial FROM readings
+                WHERE account_id IN ({placeholders})
+                ORDER BY recorded_at DESC
+                LIMIT 1
+                """,
+                [int(a) for a in account_ids],
+            )
+            row = await cursor.fetchone()
+        return (int(row[0]), str(row[1])) if row else None
+
+    async def get_spo2_series(
+        self,
+        *,
+        account_id: int,
+        device_serial: str,
+        since: datetime,
+        limit: int = 3600,
+    ) -> list[tuple[str, float]]:
+        """(recorded_at, spo2) for one device since `since`, oldest first.
+
+        Skips null/0 spo2 and never touches raw_json; served by the
+        (account_id, device_serial, recorded_at) unique index."""
+        await self.init()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT recorded_at, oxygen_saturation FROM readings
+                WHERE account_id = ? AND device_serial = ? AND recorded_at >= ?
+                  AND oxygen_saturation IS NOT NULL AND oxygen_saturation > 0
+                ORDER BY recorded_at DESC
+                LIMIT ?
+                """,
+                (int(account_id), device_serial, since.isoformat(), int(limit)),
+            )
+            rows = await cursor.fetchall()
+        return [(str(r[0]), float(r[1])) for r in reversed(rows)]
+
     async def get_readings_window(
         self,
         *,
