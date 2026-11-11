@@ -9,6 +9,7 @@ mod armed;
 mod audio;
 mod commands;
 mod controller;
+mod controller_hid;
 mod hotkeys;
 mod http;
 mod overlay;

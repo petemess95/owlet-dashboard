@@ -1671,8 +1671,8 @@ DESKTOP_SETTINGS_TEMPLATE = """  <template id="desktopSettingsTpl">
           first 2 seconds of each alert are ignored — and again each time it comes back after a
           snooze or turns red — so the flash and sound always get at least that long. A button
           already held when the alert appears doesn't count. It only snoozes, never “I'm
-          checking”, and the game still receives the press. Xbox-style (XInput) controllers only;
-          PlayStation and Switch pads need Steam Input.</small></div>
+          checking”, and the game still receives the press. Works with Xbox and PlayStation
+          (DualShock 4, DualSense) controllers; Switch pads need Steam Input.</small></div>
         <div class="ds-ctl">
           <select id="dsControllerMode" data-key="controller_mode" aria-describedby="dsControllerHint">
             <option value="off">Off</option>
@@ -1799,13 +1799,13 @@ DESKTOP_SETTINGS_JS = r"""<script>
     }).join(' + ');
   }
 
-  // ---- XInput button mask -> names ----
+  // ---- Button mask (XInput layout; PlayStation pads are mapped onto it) -> names ----
   var XINPUT_BUTTONS = [
     [0x0001, 'D-pad up'], [0x0002, 'D-pad down'], [0x0004, 'D-pad left'], [0x0008, 'D-pad right'],
-    [0x0010, 'Menu (Start)'], [0x0020, 'View (Back)'],
-    [0x0040, 'Left stick click'], [0x0080, 'Right stick click'],
-    [0x0100, 'LB'], [0x0200, 'RB'],
-    [0x1000, 'A'], [0x2000, 'B'], [0x4000, 'X'], [0x8000, 'Y']
+    [0x0010, 'Menu / Options'], [0x0020, 'View / Share'],
+    [0x0040, 'Left stick click / L3'], [0x0080, 'Right stick click / R3'],
+    [0x0100, 'LB / L1'], [0x0200, 'RB / R1'], [0x0400, 'PS button'], [0x0800, 'Touchpad click'],
+    [0x1000, 'A / Cross'], [0x2000, 'B / Circle'], [0x4000, 'X / Square'], [0x8000, 'Y / Triangle']
   ];
   function buttonNames(mask) {
     mask = Number(mask);

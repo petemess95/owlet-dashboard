@@ -1,8 +1,10 @@
-//! Controller snooze: a chosen XInput button (or combination) snoozes an amber
-//! or red alert. The press-edge / hold / guard rules, the poll predicate, the
-//! disconnected-slot back-off and button capture are pure and unit-tested;
-//! the thin OS layer (`read_slot`, the poller thread, the capture command) is
-//! not.
+//! Controller snooze: a chosen controller button (or combination) snoozes an
+//! amber or red alert. Slots 0-3 are XInput; slots 4.. are PlayStation pads
+//! read as HID devices (`controller_hid`), their buttons translated into the
+//! XInput layout. All slots go through the same rules. The press-edge / hold /
+//! guard rules, the poll predicate, the disconnected-slot back-off and button
+//! capture are pure and unit-tested; the thin OS layer (`read_slot`, the
+//! poller thread, the capture command) is not.
 //!
 //! Safety:
 //! - The only action is `commands::do_snooze`, the same path as the tray and
@@ -10,10 +12,13 @@
 //! - Presses in the first `GUARD_MS` of an appearance, and presses that began
 //!   before the guard ended (including buttons held when the alert appeared),
 //!   never count: a slot must be seen fully released after the guard first.
-//! - XInput is only read while `should_poll` holds (an alert showing on this
-//!   PC and controller_mode "chosen"), or inside a running capture.
+//! - XInput and HID are only read while `should_poll` holds (an alert showing
+//!   on this PC and controller_mode "chosen"), or inside a running capture.
+//!   HID devices are closed (reader threads stopped) as soon as that ends.
 //! - The poller runs on its own thread, never holds the alarm, fallback or
-//!   applied locks while reading XInput, and a panic stops only the poller.
+//!   applied locks while reading controllers, and a panic stops only the
+//!   poller. HID reads happen on per-device threads; the poller only loads
+//!   their latest state, so a stuck device can't block it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard};
@@ -22,6 +27,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
+use crate::controller_hid::{HidSlotStates, HidSlots, HID_SLOTS};
 use crate::log_line;
 use crate::settings::DesktopSettings;
 
@@ -33,9 +39,25 @@ pub(crate) const POLL_MS: u64 = 50;
 pub(crate) const RECHECK_MS: u64 = 1000;
 pub(crate) const CAPTURE_TIMEOUT_MS: u64 = 10_000;
 pub(crate) const CAPTURE_COLLECT_MS: u64 = 1500;
+/// At capture start, how long to wait for newly opened HID pads' first report.
+pub(crate) const CAPTURE_HID_SETTLE_MS: u64 = 300;
+/// XInput slots.
 pub(crate) const SLOTS: usize = 4;
+/// XInput slots followed by HID (PlayStation) slots.
+pub(crate) const ALL_SLOTS: usize = SLOTS + HID_SLOTS;
 
+/// wButtons per XInput slot, None = not connected.
 pub(crate) type Slots = [Option<u16>; SLOTS];
+/// The combined view: XInput slots 0-3, then HID slots.
+pub(crate) type AllSlots = [Option<u16>; ALL_SLOTS];
+
+/// One view of every controller: XInput first, then HID pads.
+pub(crate) fn merge(xinput: &Slots, hid: &HidSlotStates) -> AllSlots {
+    let mut out = [None; ALL_SLOTS];
+    out[..SLOTS].copy_from_slice(xinput);
+    out[SLOTS..].copy_from_slice(hid);
+    out
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Level {
@@ -63,13 +85,15 @@ pub(crate) fn should_poll(level: Level, controller_mode: &str, buttons: Option<u
     level != Level::None && controller_mode == "chosen" && buttons.is_some_and(|b| b != 0)
 }
 
-/// One tick's input to the snooze logic.
-pub(crate) struct Tick {
+/// One tick's input to the snooze logic. `slots` is any per-slot list
+/// (XInput only, or the combined `AllSlots`); slots past `ALL_SLOTS` are
+/// ignored and missing ones count as not connected.
+pub(crate) struct Tick<S = Slots> {
     pub(crate) now_ms: u64,
     pub(crate) level: Level,
     /// Bumped by the shell whenever the alert starts showing or changes level.
     pub(crate) appearance: u64,
-    pub(crate) slots: Slots,
+    pub(crate) slots: S,
 }
 
 #[derive(Default)]
@@ -77,7 +101,7 @@ pub(crate) struct SnoozeLogic {
     /// (appearance marker, level, start ms) of the current appearance.
     current: Option<(u64, Level, u64)>,
     /// Slot was seen with none of the chosen bits down after the guard ended.
-    armed: [bool; SLOTS],
+    armed: [bool; ALL_SLOTS],
     fired: bool,
 }
 
@@ -89,7 +113,7 @@ impl SnoozeLogic {
 
     /// Returns the slot that snoozed, if any. `mask` is controller_buttons;
     /// `chosen` is controller_mode == "chosen".
-    pub(crate) fn tick(&mut self, t: &Tick, chosen: bool, mask: u16) -> Option<usize> {
+    pub(crate) fn tick<S: AsRef<[Option<u16>]>>(&mut self, t: &Tick<S>, chosen: bool, mask: u16) -> Option<usize> {
         if t.level == Level::None {
             self.clear();
             return None;
@@ -102,7 +126,7 @@ impl SnoozeLogic {
         };
         if new {
             self.current = Some((t.appearance, t.level, t.now_ms));
-            self.armed = [false; SLOTS];
+            self.armed = [false; ALL_SLOTS];
             self.fired = false;
         }
         if !chosen || mask == 0 || self.fired {
@@ -112,11 +136,12 @@ impl SnoozeLogic {
         if t.now_ms.saturating_sub(start) < GUARD_MS {
             // Inside the guard nothing arms: a press started here (or held
             // from before the alert) must be released after the guard.
-            self.armed = [false; SLOTS];
+            self.armed = [false; ALL_SLOTS];
             return None;
         }
-        for (i, slot) in t.slots.iter().enumerate() {
-            let Some(b) = *slot else {
+        let slots = t.slots.as_ref();
+        for i in 0..ALL_SLOTS {
+            let Some(b) = slots.get(i).copied().flatten() else {
                 self.armed[i] = false;
                 continue;
             };
@@ -157,7 +182,7 @@ impl SlotReader {
 pub(crate) struct Capture {
     start_ms: u64,
     /// Per slot, bits that were down at start and not yet released.
-    blocked: [u16; SLOTS],
+    blocked: [u16; ALL_SLOTS],
     /// (slot, first fresh press ms, union) once a fresh press happened.
     pressed: Option<(usize, u64, u16)>,
 }
@@ -168,25 +193,27 @@ pub(crate) enum CaptureStep {
 }
 
 impl Capture {
-    pub(crate) fn new(now_ms: u64, initial: &Slots) -> Capture {
-        let mut blocked = [0u16; SLOTS];
+    /// `initial`: the state of every slot when capture starts (XInput only
+    /// or `AllSlots`; missing slots count as not connected).
+    pub(crate) fn new(now_ms: u64, initial: &[Option<u16>]) -> Capture {
+        let mut blocked = [0u16; ALL_SLOTS];
         for (b, s) in blocked.iter_mut().zip(initial) {
             *b = s.unwrap_or(0);
         }
         Capture { start_ms: now_ms, blocked, pressed: None }
     }
 
-    pub(crate) fn tick(&mut self, now_ms: u64, slots: &Slots) -> CaptureStep {
-        let mut fresh = [0u16; SLOTS];
-        for i in 0..SLOTS {
-            let cur = slots[i].unwrap_or(0);
+    pub(crate) fn tick(&mut self, now_ms: u64, slots: &[Option<u16>]) -> CaptureStep {
+        let mut fresh = [0u16; ALL_SLOTS];
+        for (i, (f, blocked)) in fresh.iter_mut().zip(self.blocked.iter_mut()).enumerate() {
+            let cur = slots.get(i).copied().flatten().unwrap_or(0);
             // A bit released once is never blocked again.
-            self.blocked[i] &= cur;
-            fresh[i] = cur & !self.blocked[i];
+            *blocked &= cur;
+            *f = cur & !*blocked;
         }
         match self.pressed {
             None => {
-                if let Some(i) = (0..SLOTS).find(|&i| fresh[i] != 0) {
+                if let Some(i) = (0..ALL_SLOTS).find(|&i| fresh[i] != 0) {
                     self.pressed = Some((i, now_ms, fresh[i]));
                     return CaptureStep::Waiting;
                 }
@@ -262,7 +289,7 @@ fn ms_since(epoch: Instant) -> u64 {
 }
 
 /// Start the snooze poller thread. It parks on a condvar while no alert is
-/// showing and makes no XInput calls then.
+/// showing and makes no XInput calls then, with no HID device open.
 pub(crate) fn spawn_poller(app: AppHandle) {
     let spawned = std::thread::Builder::new().name("owlet-controller".into()).spawn(move || {
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| poller(&app)));
@@ -279,8 +306,11 @@ fn poller(app: &AppHandle) {
     let epoch = Instant::now();
     let mut logic = SnoozeLogic::default();
     let mut reader = SlotReader::default();
+    // Open only while polling; dropping it stops the readers and closes the
+    // devices.
+    let mut hid: Option<HidSlots> = None;
     loop {
-        // Snapshot under the short lock; never held during XInput or snooze.
+        // Snapshot under the short lock; never held during reads or snooze.
         let (level, appearance) = {
             let p = lock();
             (p.level, p.appearance)
@@ -289,6 +319,7 @@ fn poller(app: &AppHandle) {
         if !should_poll(level, &s.controller_mode, s.controller_buttons) {
             logic.clear();
             reader = SlotReader::default();
+            hid = None;
             // Park: woken by publish(); the timeout only re-reads settings
             // (a settings change during an alert), it never touches XInput.
             let p = lock();
@@ -298,10 +329,12 @@ fn poller(app: &AppHandle) {
             continue;
         }
         let now = ms_since(epoch);
-        let slots = reader.read(now, read_slot);
+        let hid_slots = hid.get_or_insert_with(HidSlots::new).read(now);
+        let slots = merge(&reader.read(now, read_slot), &hid_slots);
         let tick = Tick { now_ms: now, level, appearance, slots };
         if let Some(slot) = logic.tick(&tick, true, s.controller_buttons.unwrap_or(0)) {
-            log_line(&format!("controller snooze: slot {slot}"));
+            let kind = if slot < SLOTS { "XInput" } else { "PlayStation" };
+            log_line(&format!("controller snooze: slot {slot} ({kind})"));
             crate::commands::do_snooze(app);
         }
         std::thread::sleep(Duration::from_millis(POLL_MS));
@@ -322,11 +355,19 @@ pub(crate) fn capture_blocking() -> Value {
     let _reset = Reset;
     let epoch = Instant::now();
     let mut reader = SlotReader::default();
-    let mut cap = Capture::new(0, &reader.read(0, read_slot));
+    let mut hid = HidSlots::new();
+    // Opens the pads; their first reports arrive a few ms later. Wait for
+    // them (briefly) so a button already held now is blocked like XInput's.
+    let _ = hid.read(0);
+    while !hid.all_reported() && ms_since(epoch) < CAPTURE_HID_SETTLE_MS {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let now = ms_since(epoch);
+    let mut cap = Capture::new(0, &merge(&reader.read(now, read_slot), &hid.read(now)));
     loop {
         std::thread::sleep(Duration::from_millis(POLL_MS));
         let now = ms_since(epoch);
-        let slots = reader.read(now, read_slot);
+        let slots = merge(&reader.read(now, read_slot), &hid.read(now));
         if let CaptureStep::Done(r) = cap.tick(now, &slots) {
             return match r {
                 Some(mask) if mask != 0 => json!({ "buttons": mask }),
@@ -617,6 +658,111 @@ mod tests {
         assert!(matches!(c.tick(50, &[Some(B), None, None, None]), CaptureStep::Waiting));
         assert!(matches!(c.tick(1000, &[Some(B), None, None, None]), CaptureStep::Waiting));
         assert!(matches!(c.tick(1550, &[Some(B), None, None, None]), CaptureStep::Done(Some(B))));
+    }
+
+    // ---- Combined XInput + HID (PlayStation) slots ----
+
+    const PS: usize = SLOTS; // first HID slot in the combined view
+
+    fn all(x: [Option<u16>; SLOTS], h: [Option<u16>; HID_SLOTS]) -> AllSlots {
+        merge(&x, &h)
+    }
+
+    fn ps(b: u16) -> AllSlots {
+        all([None; SLOTS], [Some(b), None, None, None])
+    }
+
+    fn at_all(s: &mut Sim, now: u64, slots: AllSlots) -> Option<usize> {
+        s.now = now;
+        let t = Tick { now_ms: now, level: s.level, appearance: s.appearance, slots };
+        s.logic.tick(&t, s.mode_chosen, s.mask)
+    }
+
+    #[test]
+    fn merge_puts_xinput_first_then_hid() {
+        let m = all([Some(1), None, Some(3), None], [None, Some(5), None, Some(7)]);
+        assert_eq!(m, [Some(1), None, Some(3), None, None, Some(5), None, Some(7)]);
+    }
+
+    #[test]
+    fn playstation_pad_follows_guard_and_press_edge() {
+        let mut s = Sim::new(A);
+        s.show(Level::Amber);
+        assert_eq!(at_all(&mut s, 0, ps(0)), None);
+        for t in (50..GUARD_MS).step_by(100) {
+            assert_eq!(at_all(&mut s, t, ps(A)), None, "inside guard");
+            assert_eq!(at_all(&mut s, t + 50, ps(0)), None);
+        }
+        assert_eq!(at_all(&mut s, 2000, ps(0)), None);
+        assert_eq!(at_all(&mut s, 2050, ps(B)), None, "other button");
+        assert_eq!(at_all(&mut s, 2100, ps(0)), None);
+        assert_eq!(at_all(&mut s, 2150, ps(A)), Some(PS));
+        assert_eq!(at_all(&mut s, 2200, ps(0)), None);
+        assert_eq!(at_all(&mut s, 2250, ps(A)), None, "once per appearance");
+    }
+
+    #[test]
+    fn playstation_button_held_from_before_the_alert_must_be_released() {
+        let mut s = Sim::new(LB | RB);
+        assert_eq!(at_all(&mut s, 0, ps(LB | RB)), None);
+        s.show(Level::Red);
+        for t in (50..6000).step_by(50) {
+            assert_eq!(at_all(&mut s, t, ps(LB | RB)), None);
+        }
+        assert_eq!(at_all(&mut s, 6000, ps(LB)), None, "partial release is not a release");
+        assert_eq!(at_all(&mut s, 6050, ps(LB | RB)), None);
+        assert_eq!(at_all(&mut s, 6100, ps(0)), None);
+        assert_eq!(at_all(&mut s, 6150, ps(LB | RB)), Some(PS));
+    }
+
+    #[test]
+    fn playstation_pad_appearing_with_button_held_must_release_first() {
+        let mut s = Sim::new(A);
+        s.show(Level::Amber);
+        assert_eq!(at_all(&mut s, 0, all([None; SLOTS], [None; HID_SLOTS])), None);
+        assert_eq!(at_all(&mut s, 2000, all([None; SLOTS], [None; HID_SLOTS])), None);
+        // Opened during the alert (first report already has A down).
+        assert_eq!(at_all(&mut s, 2050, ps(A)), None);
+        // Device drops (error) and comes back still held: still not armed.
+        assert_eq!(at_all(&mut s, 2100, all([None; SLOTS], [None; HID_SLOTS])), None);
+        assert_eq!(at_all(&mut s, 3100, ps(A)), None);
+        assert_eq!(at_all(&mut s, 3150, ps(0)), None);
+        assert_eq!(at_all(&mut s, 3200, ps(A)), Some(PS));
+    }
+
+    #[test]
+    fn xinput_and_playstation_pads_together() {
+        let mut s = Sim::new(LB | RB);
+        s.show(Level::Red);
+        let xs = |x: u16, p: u16| all([Some(x), None, None, None], [None, Some(p), None, None]);
+        assert_eq!(at_all(&mut s, 0, xs(0, 0)), None);
+        assert_eq!(at_all(&mut s, 2000, xs(0, 0)), None);
+        // Combination split across an Xbox pad and a PlayStation pad: no.
+        assert_eq!(at_all(&mut s, 2050, xs(LB, RB)), None);
+        assert_eq!(at_all(&mut s, 2100, xs(0, 0)), None);
+        // XInput behaves exactly as before alongside HID slots.
+        assert_eq!(at_all(&mut s, 2150, xs(LB | RB, 0)), Some(0));
+        let mut s = Sim::new(LB | RB);
+        s.show(Level::Red);
+        assert_eq!(at_all(&mut s, 0, xs(0, 0)), None);
+        assert_eq!(at_all(&mut s, 2000, xs(0, 0)), None);
+        assert_eq!(at_all(&mut s, 2050, xs(0, LB | RB)), Some(PS + 1));
+    }
+
+    #[test]
+    fn capture_sees_playstation_pads_and_ignores_their_held_buttons() {
+        let mut c = Capture::new(0, &ps(A));
+        assert!(matches!(c.tick(50, &ps(A)), CaptureStep::Waiting));
+        assert!(matches!(c.tick(100, &ps(0)), CaptureStep::Waiting));
+        assert!(matches!(c.tick(150, &ps(0x0400)), CaptureStep::Waiting));
+        assert!(matches!(c.tick(200, &ps(0)), CaptureStep::Done(Some(0x0400))));
+
+        let mut c = Capture::new(0, &all([Some(0), None, None, None], [None, Some(0), None, None]));
+        let both = |x: u16, p: u16| all([Some(x), None, None, None], [None, Some(p), None, None]);
+        assert!(matches!(c.tick(50, &both(0, 0x0001 | 0x0008)), CaptureStep::Waiting));
+        // Only the slot that pressed first is collected.
+        assert!(matches!(c.tick(100, &both(B, 0x0001 | 0x0008)), CaptureStep::Waiting));
+        assert!(matches!(c.tick(150, &both(B, 0)), CaptureStep::Done(Some(m)) if m == 0x0009));
     }
 
     #[test]

@@ -25,6 +25,9 @@ serde_json = "1"
 # PlaySoundW remains as the fallback.
 # Win32_System_Power: SetThreadExecutionState keep-awake while monitoring.
 # Win32_UI_Input_XboxController: XInputGetState for controller snooze.
+# Win32_Devices_HumanInterfaceDevice/DeviceAndDriverInstallation,
+# Storage_FileSystem, System_IO, System_Threading, Security: PlayStation pads
+# read as HID devices (SetupAPI enumeration, overlapped ReadFile).
 windows = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_Foundation",
@@ -37,6 +40,12 @@ windows = { version = "0.61", features = [
     "Win32_Devices_FunctionDiscovery",
     "Win32_System_Power",
     "Win32_UI_Input_XboxController",
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Threading",
+    "Win32_Security",
 ] }
 # We call this crate directly instead of tauri-plugin-notification: the plugin
 # routes through notify-rust, whose show() registers activation handlers on a
