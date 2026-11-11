@@ -7,6 +7,17 @@ from PIL import Image, ImageDraw, ImageFilter
 OUT = Path(__file__).resolve().parents[1] / "app" / "static"
 
 
+# Night-sky tokens (theme.css dark values, plan v0.2 section 7 D2).
+BG = (7, 9, 37)          # --bg
+BG_ACCENT = (28, 32, 82)  # --bg-accent-1
+SURFACE = (18, 20, 66)    # --surface
+INK = (231, 231, 251)     # --ink
+STAR_DIM = (201, 204, 255)  # --star-dim (eye discs)
+GLOW = (124, 128, 230)    # --sleep-light
+MINT = (155, 227, 201)    # --accent / --series-o2
+BEAK = (217, 176, 165)    # --awake, a warm tone that is not an alert colour
+
+
 def rounded_gradient(size: int) -> Image.Image:
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     px = img.load()
@@ -14,26 +25,22 @@ def rounded_gradient(size: int) -> Image.Image:
     for y in range(size):
         for x in range(size):
             t = (x * 0.35 + y * 0.65) / size
-            if t < 0.42:
-                k = t / 0.42
-                c0 = (29, 78, 216)
-                c1 = (18, 32, 51)
+            if t < 0.5:
+                k, c0, c1 = t / 0.5, BG_ACCENT, SURFACE
             else:
-                k = (t - 0.42) / 0.58
-                c0 = (18, 32, 51)
-                c1 = (15, 23, 42)
+                k, c0, c1 = (t - 0.5) / 0.5, SURFACE, BG
             px[x, y] = tuple(int(c0[i] * (1 - k) + c1[i] * k) for i in range(3)) + (255,)
 
     glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     gpx = glow.load()
     assert gpx is not None
-    cx, cy = int(size * 0.32), int(size * 0.23)
-    max_r = size * 0.58
+    cx, cy = int(size * 0.5), int(size * 0.39)
+    max_r = size * 0.51
     for y in range(size):
         for x in range(size):
             d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
-            a = max(0, 1 - d / max_r) ** 1.8
-            gpx[x, y] = (96, 165, 250, int(115 * a))
+            a = max(0, 1 - d / max_r) ** 1.6
+            gpx[x, y] = GLOW + (int(107 * a),)
     img = Image.alpha_composite(img, glow)
 
     mask = Image.new("L", (size, size), 0)
@@ -55,44 +62,34 @@ def draw_icon(size: int) -> Image.Image:
     def w(v):
         return max(1, round(v * s / 512))
 
+    # Same design as app/static/logo.svg: owl face, pulse-trace mouth, no sock.
     shadow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
     owl = scale_points([
-        (120, 170), (128, 108), (174, 73), (220, 92), (238, 101), (249, 118), (256, 135),
-        (263, 118), (274, 101), (292, 92), (338, 73), (384, 108), (392, 170), (400, 234),
-        (350, 280), (300, 258), (277, 248), (264, 229), (256, 208), (248, 229), (235, 248),
-        (212, 258), (162, 280), (112, 234),
+        (120, 200), (128, 138), (174, 103), (220, 122), (238, 131), (249, 148), (256, 165),
+        (263, 148), (274, 131), (292, 122), (338, 103), (384, 138), (392, 200), (400, 264),
+        (350, 310), (300, 288), (277, 278), (264, 259), (256, 238), (248, 259), (235, 278),
+        (212, 288), (162, 310), (112, 264),
     ], s)
-    sd.polygon([(x, y + w(15)) for x, y in owl], fill=(2, 6, 23, 85))
+    sd.polygon([(x, y + w(14)) for x, y in owl], fill=(3, 4, 26, 115))
     shadow = shadow.filter(ImageFilter.GaussianBlur(w(14)))
     img = Image.alpha_composite(img, shadow)
     d = ImageDraw.Draw(img)
-    d.polygon(owl, fill=(248, 250, 252, 245))
+    d.polygon(owl, fill=INK + (255,))
 
-    d.ellipse(box(159, 126, 255, 222), fill=(219, 234, 254, 255))
-    d.ellipse(box(257, 126, 353, 222), fill=(219, 234, 254, 255))
-    d.ellipse(box(185, 152, 229, 196), fill=(18, 32, 51, 255))
-    d.ellipse(box(283, 152, 327, 196), fill=(18, 32, 51, 255))
-    d.ellipse(box(209, 157, 223, 171), fill=(147, 197, 253, 255))
-    d.ellipse(box(307, 157, 321, 171), fill=(147, 197, 253, 255))
-    d.line(scale_points([(244, 212), (256, 232), (268, 212)], s), fill=(249, 115, 22, 255), width=w(16), joint="curve")
+    d.ellipse(box(159, 156, 255, 252), fill=STAR_DIM + (255,))
+    d.ellipse(box(257, 156, 353, 252), fill=STAR_DIM + (255,))
+    d.ellipse(box(185, 182, 229, 226), fill=SURFACE + (255,))
+    d.ellipse(box(283, 182, 327, 226), fill=SURFACE + (255,))
+    d.ellipse(box(209, 187, 223, 201), fill=INK + (255,))
+    d.ellipse(box(307, 187, 321, 201), fill=INK + (255,))
+    d.line(scale_points([(244, 242), (256, 262), (268, 242)], s), fill=BEAK + (255,), width=w(16), joint="curve")
 
-    pulse = scale_points([(106, 328), (174, 328), (194, 286), (229, 382), (263, 246), (297, 328), (406, 328)], s)
-    d.line(pulse, fill=(56, 189, 248, 255), width=w(24), joint="curve")
-    # Highlight line for tiny-size legibility.
-    d.line(pulse, fill=(186, 230, 253, 120), width=max(1, w(8)), joint="curve")
-
-    sock = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(sock)
-    sd.rounded_rectangle(box(195, 327, 279, 458), radius=w(27), fill=(248, 250, 252, 245))
-    sd.rounded_rectangle(box(252, 356, 394, 458), radius=w(52), fill=(248, 250, 252, 245))
-    sd.rounded_rectangle(box(216, 346, 258, 437), radius=w(12), fill=(219, 234, 254, 255))
-    sd.rounded_rectangle(box(258, 376, 373, 437), radius=w(32), fill=(219, 234, 254, 255))
-    sd.pieslice(box(322, 376, 373, 437), start=-90, end=90, fill=(37, 99, 235, 220))
-    img = Image.alpha_composite(img, sock)
-
-    d = ImageDraw.Draw(img)
-    d.arc(box(92, 38, 420, 154), start=196, end=344, fill=(147, 197, 253, 120), width=w(14))
+    pulse = scale_points([(136, 362), (198, 362), (218, 330), (246, 404), (274, 300), (298, 362), (376, 362)], s)
+    d.line(pulse, fill=MINT + (255,), width=w(24), joint="curve")
+    r = w(12)
+    for x, y in (pulse[0], pulse[-1]):
+        d.ellipse((x - r, y - r, x + r, y + r), fill=MINT + (255,))
     return img
 
 

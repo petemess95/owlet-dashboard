@@ -8,8 +8,8 @@ MANIFEST = {
     "start_url": "/",
     "scope": "/",
     "display": "standalone",
-    "background_color": "#f5f7fb",
-    "theme_color": "#122033",
+    "background_color": "#070925",
+    "theme_color": "#070925",
     "orientation": "portrait-primary",
     "categories": ["health", "utilities"],
     "icons": [
@@ -35,7 +35,7 @@ MANIFEST = {
 }
 
 SERVICE_WORKER_JS = """
-const CACHE_NAME = 'owlet-dashboard-v4';
+const CACHE_NAME = 'owlet-dashboard-v5';
 // Only truly immutable assets are safe to serve cache-first. Styles and
 // scripts change with every release, so they go network-first below —
 // otherwise one stale theme.css leaves the app half-styled until the

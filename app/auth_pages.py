@@ -4,39 +4,16 @@ import html
 
 from app.shell import THEME_RESOLVER
 
-# These pages are standalone: they do not load theme.css (it is the signed-in
-# app's sheet), so they carry a small local copy of the night-sky palette and
-# the bundled fonts. Values mirror theme.css (plan v0.2 section 7 D2); keep the two
-# in step. Dark is the default; THEME_RESOLVER (the app's own) sets
-# data-theme from the theme saved on this device, else the system setting, so
-# sign-in looks like the app the visitor is about to land in.
-_TOKENS = """
-    @font-face { font-family: 'Source Sans 3'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/source-sans-3-latin-400-normal.woff2') format('woff2'); }
-    @font-face { font-family: 'Source Sans 3'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/source-sans-3-latin-600-normal.woff2') format('woff2'); }
-    @font-face { font-family: 'Source Sans 3'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/source-sans-3-latin-700-normal.woff2') format('woff2'); }
-    @font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/source-serif-4-latin-400-normal.woff2') format('woff2'); }
-    @font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/source-serif-4-latin-600-normal.woff2') format('woff2'); }
-    :root, :root[data-theme="dark"] {
-      color-scheme: dark;
-      --bg:#070925; --bg-accent-1:#1c2052; --bg-accent-2:#1a1d52;
-      --surface:#121442; --surface-inset:#0c0e33; --surface-line:rgba(190,195,255,.13);
-      --ink:#e7e7fb; --dim:#a9acd9;
-      --accent:#9be3c9; --accent-soft:rgba(155,227,201,.13); --on-accent:#0b0d33;
-      --warn:#ffcf66; --bad:#ff7b7b;
-      --star-bright:#e7e7fb; --star-dim:#c9ccff; --sky-display:block;
-      --radius-card:28px; --radius-control:999px; --radius-field:14px;
-      --font-sans:'Source Sans 3',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
-      --font-serif:'Source Serif 4','Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
-    }
-    :root[data-theme="light"] {
-      color-scheme: light;
-      --bg:#f1f0fb; --bg-accent-1:#dfdcf7; --bg-accent-2:#e9e7f8;
-      --surface:#ffffff; --surface-inset:#f4f3fc; --surface-line:rgba(40,44,110,.12);
-      --ink:#1b1d4d; --dim:#555a8c;
-      --accent:#167a5c; --accent-soft:rgba(22,122,92,.1); --on-accent:#ffffff;
-      --warn:#955800; --bad:#c8322f;
-      --star-bright:#a7a3de; --star-dim:#c4c1ea; --sky-display:none;
-    }
+# These pages are standalone (no app shell) but share the app's colours: each
+# head links /theme.css, which is public (served without a session) so sign-in
+# renders before login. Only page-local, non-colour rules live here. Dark is
+# the default; THEME_RESOLVER (the app's own) sets data-theme from the theme
+# saved on this device, else the system setting, so sign-in looks like the app
+# the visitor is about to land in.
+_THEME_LINK = '<link rel="stylesheet" href="/theme.css" />'
+_BASE_STYLES = """
+    :root, :root[data-theme="dark"] { color-scheme: dark; --radius-field:14px; }
+    :root[data-theme="light"] { color-scheme: light; }
     * { box-sizing:border-box; }
     body { margin:0; font-family:var(--font-sans); color:var(--ink);
       background:radial-gradient(900px 420px at 50% 60px, var(--bg-accent-1), transparent 70%) no-repeat, var(--bg); }
@@ -87,7 +64,8 @@ _BASE = """<!doctype html>
   <title>{title} · Owlet Dashboard</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
   {resolver}
-  <style>{tokens}
+  <link rel="stylesheet" href="/theme.css" />
+  <style>{base_styles}
     body {{ display:flex; min-height:100vh; align-items:center; justify-content:center; padding:24px 16px; }}
     .card {{ background:var(--surface); border-radius:var(--radius-card);
             padding:36px 32px 28px; width:100%; max-width:440px; }}
@@ -114,7 +92,7 @@ _BASE = """<!doctype html>
 
 
 def _page(title: str, body: str) -> str:
-    return _BASE.format(title=html.escape(title), body=body, tokens=_TOKENS, resolver=THEME_RESOLVER)
+    return _BASE.format(title=html.escape(title), body=body, base_styles=_BASE_STYLES, resolver=THEME_RESOLVER)
 
 
 def _error(error: str | None) -> str:
@@ -129,7 +107,7 @@ def desktop_redirect_page(url: str) -> str:
     return (
         f'<!doctype html><meta charset="utf-8">'
         f'<meta http-equiv="refresh" content="0; url={safe}">'
-        f'{THEME_RESOLVER}<style>{_TOKENS}</style>'
+        f'{THEME_RESOLVER}{_THEME_LINK}<style>{_BASE_STYLES}</style>'
         f'<script>location.replace({html.escape(_json_str(url))})</script>'
         f'<p style="font-size:15px;padding:24px;color:var(--dim)">Connecting to {safe}…</p>'
     )
@@ -150,7 +128,7 @@ def desktop_launcher_page(current_backend: str | None = None, error: str | None 
         )
     prefill = html.escape(current_backend or "", quote=True)
     return _LAUNCHER.format(error=_error(error), change=change, prefill=prefill,
-                            tokens=_TOKENS, resolver=THEME_RESOLVER)
+                            base_styles=_BASE_STYLES, resolver=THEME_RESOLVER)
 
 
 _LAUNCHER = """<!doctype html>
@@ -161,7 +139,8 @@ _LAUNCHER = """<!doctype html>
   <title>Owlet Dashboard — get started</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
   {resolver}
-  <style>{tokens}
+  <link rel="stylesheet" href="/theme.css" />
+  <style>{base_styles}
     h1, h2, p {{ margin:0; }}
     body {{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px 16px; }}
     .wrap {{ width:100%; max-width:640px; }}
@@ -233,7 +212,8 @@ _LANDING = """<!doctype html>
   <title>Owlet Dashboard — every night, remembered</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
   {resolver}
-  <style>{tokens}
+  <link rel="stylesheet" href="/theme.css" />
+  <style>{base_styles}
     /* Split screen on one sky: the story on the left, the sign-in card on the
        right. Night sky by default, morning sky in light. */
     h1, h2, p {{ margin:0; }}
@@ -379,7 +359,7 @@ def login_page(error: str | None = None, desktop_mode: bool = False) -> str:
         signin_sub=signin_sub,
         signup_line=signup_line,
         email_label=email_label,
-        tokens=_TOKENS,
+        base_styles=_BASE_STYLES,
         resolver=THEME_RESOLVER,
     )
 

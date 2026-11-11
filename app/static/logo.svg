@@ -1,34 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Owlet Dashboard logo</title>
-  <desc id="desc">Rounded dark-blue app icon with owl eyes, a pulse trace, and a small sock mark.</desc>
+  <desc id="desc">Night-sky app icon: a lavender owl face whose mouth is a mint pulse trace.</desc>
   <defs>
     <linearGradient id="bg" x1="80" y1="24" x2="432" y2="488" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1d4ed8"/>
-      <stop offset="0.45" stop-color="#122033"/>
-      <stop offset="1" stop-color="#0f172a"/>
+      <stop offset="0" stop-color="#1c2052"/>
+      <stop offset="0.5" stop-color="#121442"/>
+      <stop offset="1" stop-color="#070925"/>
     </linearGradient>
-    <radialGradient id="glow" cx="164" cy="138" r="284" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#60a5fa" stop-opacity="0.64"/>
-      <stop offset="0.42" stop-color="#2563eb" stop-opacity="0.24"/>
-      <stop offset="1" stop-color="#0f172a" stop-opacity="0"/>
+    <radialGradient id="glow" cx="256" cy="200" r="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7c80e6" stop-opacity="0.42"/>
+      <stop offset="0.5" stop-color="#4a4fc0" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#070925" stop-opacity="0"/>
     </radialGradient>
     <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#020617" flood-opacity="0.36"/>
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#03041a" flood-opacity="0.45"/>
     </filter>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
   <rect width="512" height="512" rx="112" fill="url(#glow)"/>
-  <path d="M120 170 C128 108 174 73 220 92 C238 101 249 118 256 135 C263 118 274 101 292 92 C338 73 384 108 392 170 C400 234 350 280 300 258 C277 248 264 229 256 208 C248 229 235 248 212 258 C162 280 112 234 120 170Z" fill="#f8fafc" opacity="0.96" filter="url(#soft-shadow)"/>
-  <circle cx="207" cy="174" r="48" fill="#dbeafe"/>
-  <circle cx="305" cy="174" r="48" fill="#dbeafe"/>
-  <circle cx="207" cy="174" r="22" fill="#122033"/>
-  <circle cx="305" cy="174" r="22" fill="#122033"/>
-  <circle cx="216" cy="164" r="7" fill="#93c5fd"/>
-  <circle cx="314" cy="164" r="7" fill="#93c5fd"/>
-  <path d="M244 212 L256 232 L268 212" fill="none" stroke="#f97316" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M106 328 H174 L194 286 L229 382 L263 246 L297 328 H406" fill="none" stroke="#38bdf8" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M334 356 C370 356 394 381 394 415 C394 439 376 458 352 458 H238 C214 458 195 439 195 415 V354 C195 339 207 327 222 327 H252 C267 327 279 339 279 354 V376 H334Z" fill="#f8fafc" opacity="0.96"/>
-  <path d="M279 376 H337 C357 376 373 392 373 412 C373 426 362 437 348 437 H240 C227 437 216 426 216 413 V357 C216 351 221 346 227 346 H247 C253 346 258 351 258 357 V379 C258 391 267 400 279 400Z" fill="#dbeafe"/>
-  <path d="M322 437 H348 C362 437 373 426 373 412 C373 401 368 391 360 384 C356 414 342 431 322 437Z" fill="#2563eb" opacity="0.86"/>
-  <path d="M92 96 C130 56 186 38 256 38 C326 38 382 56 420 96" fill="none" stroke="#93c5fd" stroke-width="14" stroke-linecap="round" opacity="0.45"/>
+  <path d="M120 200 C128 138 174 103 220 122 C238 131 249 148 256 165 C263 148 274 131 292 122 C338 103 384 138 392 200 C400 264 350 310 300 288 C277 278 264 259 256 238 C248 259 235 278 212 288 C162 310 112 264 120 200Z" fill="#e7e7fb" filter="url(#soft-shadow)"/>
+  <circle cx="207" cy="204" r="48" fill="#c9ccff"/>
+  <circle cx="305" cy="204" r="48" fill="#c9ccff"/>
+  <circle cx="207" cy="204" r="22" fill="#121442"/>
+  <circle cx="305" cy="204" r="22" fill="#121442"/>
+  <circle cx="216" cy="194" r="7" fill="#e7e7fb"/>
+  <circle cx="314" cy="194" r="7" fill="#e7e7fb"/>
+  <path d="M244 242 L256 262 L268 242" fill="none" stroke="#d9b0a5" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M136 362 H198 L218 330 L246 404 L274 300 L298 362 H376" fill="none" stroke="#9be3c9" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
