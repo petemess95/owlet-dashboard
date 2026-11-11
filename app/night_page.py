@@ -7,81 +7,197 @@ from __future__ import annotations
 from app.shell import render_shell
 
 NIGHT_HEAD = """<style>
-    .stars { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .4s; }
-    :root[data-theme="dark"] .stars { opacity: .5; }
-    .stars {
-      background-image:
-        radial-gradient(1px 1px at 12% 22%, var(--star-bright) 50%, transparent 50%),
-        radial-gradient(1px 1px at 78% 12%, var(--star-bright) 50%, transparent 50%),
-        radial-gradient(1.5px 1.5px at 55% 8%, var(--star-dim) 50%, transparent 50%),
-        radial-gradient(1px 1px at 32% 6%, var(--star-bright) 50%, transparent 50%),
-        radial-gradient(1px 1px at 90% 38%, var(--star-dim) 50%, transparent 50%),
-        radial-gradient(1.5px 1.5px at 8% 52%, var(--star-bright) 50%, transparent 50%);
-    }
-    .night-nav { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
-    .night-nav button { all: unset; cursor: pointer; color: var(--dim); font-size: 22px;
-      padding: 0 6px; border-radius: 8px; }
-    .night-nav button:hover:not(:disabled) { color: var(--ink); }
-    .night-nav button:disabled { opacity: .25; cursor: default; }
-    h1 { font-size: clamp(34px, 6vw, 52px); letter-spacing: -0.025em; line-height: 1.04; margin: 0; }
-    h1 small { display: block; font-size: 15px; letter-spacing: 0; color: var(--dim);
-      font-weight: 400; margin-top: 10px; }
-    .lede { font-size: 17px; line-height: 1.55; color: var(--dim);
-      margin: 18px 0 34px; }
+    /* Page-local tokens (candidates for theme.css): the radius of an inset
+       well inside a card, and the timeline's row heights. */
+    .shell-main { --night-well-radius: 18px; --tl-o2-h: 104px; --tl-stage-h: 72px; }
+
+    /* night picker: a pill capsule, the same control language as the top bar */
+    .night-nav { display: inline-flex; align-items: center; gap: 4px; padding: 4px;
+      max-width: 100%; border-radius: var(--radius-pill); background: var(--pill-track); }
+    .night-nav button { all: unset; box-sizing: border-box; cursor: pointer; flex: none;
+      width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%;
+      color: var(--ink); }
+    .night-nav button svg { width: 16px; height: 16px; }
+    .night-nav button:hover:not(:disabled) { background: var(--pill-hover); }
+    .night-nav button:disabled { opacity: .35; cursor: default; }
+    .night-when { min-width: 0; padding: 0 10px; font-size: 15px; line-height: 1.3;
+      color: var(--dim); text-align: center; }
+    .night-when b { color: var(--ink); font-weight: 700; margin-right: 6px; }
+
+    /* the one-line story */
+    h1.headline { font-family: var(--font-serif); font-weight: 400;
+      font-size: clamp(34px, 6vw, 56px); line-height: 1.08; letter-spacing: -0.01em;
+      margin: 22px 0 0; color: var(--ink); }
+    h1.headline b { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .lede { font-size: 18px; line-height: 1.55; color: var(--dim); margin: 14px 0 30px;
+      max-width: 62ch; }
     .lede b { color: var(--ink); font-weight: 600; }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 12px; margin-bottom: 34px; }
-    .stat { padding: 18px 18px 15px; }
-    .stat b { display: block; font-size: clamp(24px, 3.4vw, 32px); letter-spacing: -0.02em;
-      font-variant-numeric: tabular-nums; }
-    .stat span { font-size: 12px; color: var(--dim); }
-    .stat .sub { font-size: 11.5px; color: var(--faint); margin-top: 4px; display: block; }
-    .stat.alert b { color: var(--bad); }
-    .stat.warnish b { color: var(--warn); }
-    .stat.calm b { color: var(--good); }
-    .timeline-card { padding: 20px; margin-bottom: 34px; }
-    .timeline { display: flex; height: 44px; border-radius: var(--radius-control); overflow: hidden;
-      background: var(--nodata); }
-    .timeline span { height: 100%; }
-    .tl-axis { display: flex; justify-content: space-between; font-size: 11px;
-      color: var(--faint); margin-top: 8px; font-variant-numeric: tabular-nums; }
-    .legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 12px; color: var(--dim);
-      margin-top: 14px; }
-    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px;
-      margin-right: 6px; vertical-align: -1px; }
-    .events { display: grid; gap: 10px; margin-bottom: 34px; }
-    .event { display: flex; align-items: baseline; gap: 14px; padding: 14px 18px;
-      font-size: 14px; }
-    .event time { color: var(--dim); font-variant-numeric: tabular-nums; flex: 0 0 76px; }
-    .event .depth { margin-left: auto; color: var(--bad); font-weight: 600;
-      font-variant-numeric: tabular-nums; }
-    .event.fine { color: var(--dim); }
-    .event.fine .tick { color: var(--good); margin-right: 4px; }
-    .week { padding: 20px; }
-    .week-bars { display: flex; align-items: flex-end; gap: 10px; height: 92px; margin-top: 6px; }
+
+    .card-title { font-size: 21px; font-weight: 700; margin: 0; color: var(--ink); }
+    .card-head { display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 4px 16px; margin-bottom: 16px; }
+    .card-head a { color: var(--accent); text-decoration: none; font-size: 15px; font-weight: 600; }
+    .card-head a:hover { text-decoration: underline; }
+
+    /* ---- the night timeline: the centrepiece ---- */
+    .timeline-card { padding: 26px 28px 28px; margin-bottom: 20px; }
+    .tl-well { background: var(--surface-inset); border-radius: var(--night-well-radius);
+      padding: 14px 22px 12px; }
+    .tl-readout { min-height: 2.9em; font-size: 14px; line-height: 1.45; color: var(--dim);
+      font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+    .tl-readout b { color: var(--ink); font-weight: 600; }
+    .tl-plot { position: relative; touch-action: pan-y; cursor: crosshair;
+      user-select: none; -webkit-user-select: none; }
+    .tl-marks { position: relative; z-index: 3; }
+    .tl-row-label { font-size: 12.5px; font-weight: 600; color: var(--dim); margin: 6px 0 4px; }
+    .tl-row-label span { position: relative; z-index: 2; padding-right: 8px;
+      background: var(--surface-inset); }
+    .tl-o2 { position: relative; height: var(--tl-o2-h); }
+    .tl-o2 svg { display: block; width: 100%; height: 100%; overflow: visible; }
+    .tl-o2 polyline { fill: none; stroke: var(--series-o2); stroke-width: 2;
+      stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+    .tl-o2 line { stroke-width: 1.5; stroke-dasharray: 5 5; vector-effect: non-scaling-stroke; }
+    .tl-o2 line.warn { stroke: var(--warn); }
+    .tl-o2 line.bad { stroke: var(--bad); stroke-dasharray: 2 4; }
+    .tl-th { position: absolute; right: 0; transform: translateY(-100%); padding: 0 0 1px 6px;
+      font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tl-th.warn { color: var(--warn); }
+    .tl-th.bad { color: var(--bad); transform: none; padding: 1px 0 0 6px; }
+    /* sleep stages: colour AND height (taller = deeper), square-cornered bars
+       in a gently rounded strip so the first and last minutes are never clipped */
+    .tl-stages { display: flex; align-items: flex-end; height: var(--tl-stage-h);
+      border-radius: 6px; overflow: hidden; background: var(--nodata); }
+    .tl-stages span { flex: 1 1 0; min-width: 0; }
+    .tl-stages .deep { height: 100%; background: var(--sleep-deep); }
+    .tl-stages .light { height: 64%; background: var(--sleep-light); }
+    .tl-stages .awake { height: 30%; background: var(--awake); }
+    .tl-stages .nodata { height: 0; }
+
+    /* oxygen dip markers: tier colour + glyph + the number, never colour alone */
+    .tl-dip { all: unset; box-sizing: border-box; cursor: pointer; position: absolute;
+      transform: translateX(-50%); height: 24px; padding: 0 9px; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 4px;
+      border-radius: var(--radius-pill); color: var(--on-accent);
+      font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tl-dip.warn { background: var(--warn); }
+    .tl-dip.bad { background: var(--bad); }
+    .tl-dip[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface-inset), 0 0 0 4px var(--ink);
+      z-index: 2; }
+    .tl-stem { position: absolute; bottom: var(--tl-pad, 0px); width: 0; pointer-events: none; z-index: 1;
+      border-left: 2px dashed var(--warn); }
+    .tl-stem.bad { border-left: 2px solid var(--bad); }
+    .tl-band { position: absolute; top: 0; bottom: 0; min-width: 8px; pointer-events: none;
+      border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--ink);
+      background: color-mix(in srgb, var(--ink) 12%, transparent); }
+    .tl-band[hidden], .tl-x[hidden] { display: none; }
+    .tl-x { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--dim);
+      pointer-events: none; }
+    .tl-now { position: absolute; top: 0; bottom: 0; width: 0; pointer-events: none;
+      border-left: 2px solid var(--accent); }
+    .tl-now span { position: absolute; bottom: 100%; left: 0; transform: translateX(-50%);
+      font-size: 11.5px; font-weight: 700; color: var(--accent); }
+    .tl-axis { display: flex; justify-content: space-between; font-size: 12.5px;
+      color: var(--dim); margin-top: 8px; font-variant-numeric: tabular-nums; }
+    .legend { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 18px;
+      font-size: 13.5px; color: var(--dim); margin-top: 14px; }
+    .legend i { display: inline-block; width: 10px; height: 12px; border-radius: 2px;
+      margin-right: 6px; }
+    .legend .sw-deep { background: var(--sleep-deep); }
+    .legend .sw-light { background: var(--sleep-light); height: 8px; }
+    .legend .sw-awake { background: var(--awake); height: 4px; }
+    .legend .sw-nodata { background: var(--nodata); box-shadow: inset 0 0 0 1px var(--surface-line); }
+    .legend .sw-o2 { background: var(--series-o2); height: 3px; width: 16px; vertical-align: 3px; }
+    .legend .sw-dip { width: auto; height: auto; padding: 0 6px;
+      border-radius: var(--radius-pill); background: var(--warn); color: var(--on-accent);
+      font-style: normal; font-weight: 700; font-size: 11.5px; }
+    .legend .sw-dip.bad { background: var(--bad); }
+
+    /* the event list, linked to the timeline */
+    .ev-head { display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 2px 14px; margin: 24px 0 10px; }
+    .ev-head h3 { margin: 0; font-size: 17px; font-weight: 700; }
+    .ev-head span { font-size: 13.5px; color: var(--dim); }
+    .events { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .event { display: flex; align-items: stretch; gap: 4px; font-size: 15px;
+      background: var(--surface-inset); border-radius: var(--night-well-radius); }
+    .event.selected { box-shadow: inset 0 0 0 2px var(--ink); }
+    .ev-pick { all: unset; box-sizing: border-box; cursor: pointer; flex: 1; min-width: 0;
+      display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px;
+      padding: 13px 8px 13px 16px; border-radius: var(--night-well-radius); }
+    .ev-pick:hover { background: var(--pill-hover); }
+    .ev-pick time { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums;
+      flex: 0 0 76px; }
+    .ev-text { color: var(--dim); flex: 1 1 180px; }
+    .ev-on { display: none; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+    .event.selected .ev-on { display: inline; }
+    .depth { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .event.warn .depth { color: var(--warn); }
+    .event.bad .depth { color: var(--bad); }
+    .ev-trace { flex: none; display: flex; align-items: center; padding: 0 16px 0 10px;
+      color: var(--accent); font-size: 14px; font-weight: 600; text-decoration: none;
+      white-space: nowrap; border-radius: var(--night-well-radius); }
+    .ev-trace:hover { text-decoration: underline; }
+    .event.fine { padding: 13px 16px; color: var(--dim); gap: 8px; }
+    .event.fine .tick { color: var(--good); font-weight: 700; }
+
+    /* the numbers */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 20px; }
+    .stat { padding: 20px 22px 18px; }
+    .stat b { display: block; font-size: clamp(26px, 3.4vw, 34px); font-weight: 700;
+      letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+    .stat span { font-size: 14px; color: var(--dim); }
+    .stat .sub { font-size: 13px; color: var(--dim); margin-top: 4px; display: block; }
+    .stat.o2 b { color: var(--series-o2); }
+    .stat.hr b { color: var(--series-hr); }
+    .stat.alert b, .stat.alert .flag { color: var(--bad); }
+    .stat.warnish b, .stat.warnish .flag { color: var(--warn); }
+    .stat .flag { font-weight: 700; }
+
+    .week { padding: 26px 28px; }
+    .week-bars { display: flex; align-items: flex-end; gap: 10px; height: 104px; margin-top: 16px; }
     .wb { flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
-      align-items: center; gap: 6px; height: 100%; }
+      align-items: center; gap: 6px; height: 100%; min-width: 0; }
     .wb i { display: flex; flex-direction: column; width: 100%; max-width: 46px;
       border-radius: 6px 6px 2px 2px; overflow: hidden; min-height: 3px; }
     .wb i u { display: block; }
     .wb i .lt { background: var(--sleep-light); flex-grow: 1; }
     .wb i .dp { background: var(--sleep-deep); }
-    .wb.tonight i { box-shadow: 0 0 18px var(--accent-soft); }
-    .wb span { font-size: 10.5px; color: var(--faint); }
-    .wb b { font-size: 11px; color: var(--dim); font-weight: 500;
+    .wb span { font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+    .wb.shown span { color: var(--ink); font-weight: 700;
+      text-decoration: underline; text-underline-offset: 3px; }
+    .wb b { font-size: 12.5px; color: var(--dim); font-weight: 600; white-space: nowrap;
       font-variant-numeric: tabular-nums; }
-    .week .legend { margin-top: 14px; }
-    .week-note { font-size: 13px; color: var(--dim); line-height: 1.55; margin: 12px 0 0; }
+    .week-note { font-size: 15px; color: var(--dim); line-height: 1.55; margin: 14px 0 0; }
     .week-note b { color: var(--ink); font-weight: 600; }
-    .empty { text-align: center; color: var(--dim); padding: 70px 20px; font-size: 15px; }
+    .empty { text-align: center; color: var(--dim); padding: 48px 24px; font-size: 16px;
+      line-height: 1.55; margin-bottom: 20px; }
+    .empty svg { display: block; width: 44px; height: 44px; margin: 0 auto 14px; color: var(--dim); }
+    .empty b { display: block; color: var(--ink); font-size: 19px; margin-bottom: 4px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap; }
+
+    @media (max-width: 640px) {
+      .shell-main { --tl-o2-h: 88px; --tl-stage-h: 60px; }
+      .timeline-card, .week { padding: 20px 16px; }
+      .tl-well { padding: 12px 14px 10px; }
+      /* phone: markers shrink to their glyph; the number is in the list below */
+      .tl-dip { padding: 0; width: 24px; justify-content: center; }
+      .tl-dip .n { display: none; }
+      .night-when b { display: block; margin: 0; }
+      .lede { font-size: 17px; }
+      .tl-axis span:nth-child(even) { display: none; }
+      .wb b { font-size: 11px; } .wb span { font-size: 11.5px; } .week-bars { gap: 5px; }
+      .ev-pick { padding-left: 14px; } .ev-trace { padding-right: 14px; }
+    }
   </style>"""
 
-NIGHT_BODY = """<div class="stars" aria-hidden="true"></div>
-    <div class="night-nav">
-      <button id="prevNight" aria-label="Previous night">‹</button>
-      <h1 id="nightTitle">Tonight<small id="nightSub">loading…</small></h1>
-      <button id="nextNight" aria-label="Next night">›</button>
+NIGHT_BODY = """<div class="night-nav" role="group" aria-label="Choose a night">
+      <button id="prevNight" type="button" aria-label="Previous night"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg></button>
+      <span class="night-when"><b id="nightKicker">Tonight</b><span id="nightSub">loading…</span></span>
+      <button id="nextNight" type="button" aria-label="Next night"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button>
     </div>
+    <h1 class="headline" id="nightTitle">Tonight</h1>
     <p class="lede" id="lede"></p>
     <div id="content"></div>"""
 
@@ -219,64 +335,262 @@ NIGHT_SCRIPTS = """<script>
       return `${opener} ${sleepText}, with ${mood}.`;
     }
 
-    function renderTimeline(window, buckets) {
+    // ---- timeline <-> event list linkage -------------------------------------
+    const STAGE_WORDS = { deep: 'deep sleep', light: 'light sleep', awake: 'awake', nodata: 'no signal' };
+    const dipTier = dip => dip.min < O2.critical ? 'bad' : 'warn';
+    // tier is carried by a glyph and a number as well as the colour
+    const dipGlyph = dip => dipTier(dip) === 'bad' ? '\\u26A0\\uFE0E' : '\\u2193';
+    const dipUnder = dip => dipTier(dip) === 'bad' ? O2.critical : O2.warn;
+    let tl = null;            // what the timeline on screen was drawn from
+    let currentDips = [];
+    let selectedDip = null;   // start time (ms) of the selected dip; survives refreshes
+    let shownOffset = 0;
+
+    function renderTimeline(win, buckets, dips) {
+      const t0 = win.start.getTime(), t1 = win.end.getTime(), spanMs = t1 - t0;
+      const step = BUCKET_SEC * 1000;
       const byTime = new Map(buckets.map(row => [new Date(row.bucket_start).getTime(), row]));
-      const colors = { deep: 'var(--sleep-deep)', light: 'var(--sleep-light)', awake: 'var(--awake)', nodata: 'transparent' };
+      tl = { t0, spanMs, step, byTime };
+      const pct = ms => (ms - t0) / spanMs * 100;
+
+      // Oxygen scale: 100% at the top, down to just under the lowest reading
+      // (and always far enough to show both threshold lines).
+      const lows = buckets.map(row => row.min_oxygen_saturation).filter(v => v != null && v > 0);
+      const floor = Math.max(50, Math.min(O2.critical - 2, lows.length ? Math.floor(Math.min(...lows)) - 1 : 100));
+      const yOf = v => 4 + (100 - Math.max(floor, Math.min(100, v))) / (100 - floor) * 92;
+
       let spans = '';
-      for (let t = window.start.getTime(); t < window.end.getTime(); t += BUCKET_SEC * 1000) {
+      const runs = [];
+      let run = [];
+      for (let t = t0; t < t1; t += step) {
         const row = byTime.get(t);
-        const cls = row ? classify(row) : 'nodata';
-        spans += `<span style="flex:1;background:${colors[cls]}"></span>`;
+        spans += `<span class="${row ? classify(row) : 'nodata'}"></span>`;
+        const v = row ? (row.min_oxygen_saturation != null ? row.min_oxygen_saturation : row.avg_oxygen_saturation) : null;
+        if (v != null && v > 0) run.push([(t + step / 2 - t0) / spanMs * 1000, yOf(v)]);
+        else if (run.length) { runs.push(run); run = []; }
       }
+      if (run.length) runs.push(run);
+      const half = step / spanMs * 500;
+      const trace = runs.map(points => {
+        if (points.length === 1) points = [[points[0][0] - half, points[0][1]], [points[0][0] + half, points[0][1]]];
+        return `<polyline points="${points.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}"/>`;
+      }).join('');
+      const tiers = [['warn', O2.warn], ['bad', O2.critical]];
+      const thresholdLines = tiers.map(([cls, v]) =>
+        `<line class="${cls}" x1="0" x2="1000" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}"/>`).join('');
+      const thresholdLabels = tiers.map(([cls, v]) =>
+        `<span class="tl-th ${cls}" style="top:${yOf(v).toFixed(1)}%">${v}%</span>`).join('');
+
+      // Dip markers sit at the dip's lowest point; layoutMarks() then steps
+      // neighbours down a row so they do not cover each other.
+      let marks = '', stems = '';
+      dips.forEach((dip, i) => {
+        const x = pct(dip.minAt.getTime() + step / 2);
+        const tier = dipTier(dip);
+        const low = Math.round(dip.min);
+        marks += `<button type="button" class="tl-dip ${tier}" data-dip="${i}" aria-pressed="false"
+          style="left:clamp(14px, ${x.toFixed(2)}%, calc(100% - 14px));top:0"
+          aria-label="Oxygen dip to ${low}% at ${fmtClock(dip.start)}, under ${dipUnder(dip)}%. Show it in the event list."><span aria-hidden="true">${dipGlyph(dip)}</span><span class="n">${low}%</span></button>`;
+        stems += `<i class="tl-stem ${tier}" style="left:${x.toFixed(2)}%;top:24px"></i>`;
+      });
+      const marksH = dips.length ? 30 : 0;
+
+      const now = Date.now();
+      const live = win.inProgress && now > t0 && now < t1;
+      const nowMark = live
+        ? `<i class="tl-now" style="left:${pct(now).toFixed(2)}%;top:${marksH}px;bottom:18px"><span style="top:100%;bottom:auto">now</span></i>` : '';
+
       const axis = [];
       for (let k = 0; k <= 4; k++) {
-        const d = new Date(window.start.getTime() + (window.end - window.start) * k / 4);
+        const d = new Date(t0 + spanMs * k / 4);
         axis.push(`<span>${fmtClock(d)}</span>`);
       }
-      const nightFocus = encodeURIComponent(window.start.toISOString());
-      const nightSpan = Math.round((window.end - window.start) / 60000);
-      return `<div class="timeline-card card"><h2 class="section-title">The night, minute by minute
-        <a href="/data?focus=${nightFocus}&span=${nightSpan}" data-workbench style="float:right;color:var(--accent);text-decoration:none;text-transform:none;letter-spacing:0">raw trace →</a></h2>
-        <div class="timeline">${spans}</div>
-        <div class="tl-axis">${axis.join('')}</div>
+      const nightFocus = encodeURIComponent(win.start.toISOString());
+      const nightSpan = Math.round(spanMs / 60000);
+      const dipSummary = dips.length
+        ? `${dips.length} oxygen dip${dips.length === 1 ? '' : 's'} marked; each is listed under Oxygen events below.`
+        : `No oxygen dips below ${O2.warn}%.`;
+      return `<section class="timeline-card card" aria-labelledby="tlTitle">
+        <div class="card-head"><h2 class="card-title" id="tlTitle">The night, minute by minute</h2>
+          <a href="/data?focus=${nightFocus}&span=${nightSpan}" data-workbench>Raw trace →</a></div>
+        <div class="tl-well">
+          <p class="sr-only">Timeline from ${fmtClock(win.start)} to ${fmtClock(win.end)}: oxygen above, sleep stages below. ${dipSummary}</p>
+          <p class="tl-readout" id="tlReadout"></p>
+          <div class="tl-plot" id="tlPlot" style="--tl-pad:${live ? 18 : 0}px;padding-bottom:var(--tl-pad)">
+            <div class="tl-marks" style="height:${marksH}px">${marks}</div>
+            <div class="tl-row-label"><span>Oxygen · lowest reading in each 5 minutes</span></div>
+            <div class="tl-o2"><svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">${thresholdLines}${trace}</svg>${thresholdLabels}</div>
+            <div class="tl-row-label"><span>Sleep · taller is deeper</span></div>
+            <div class="tl-stages" aria-hidden="true">${spans}</div>
+            ${stems}
+            <i class="tl-band" id="tlBand" style="bottom:var(--tl-pad)" hidden></i>
+            ${nowMark}
+            <i class="tl-x" id="tlX" style="bottom:var(--tl-pad)" hidden></i>
+          </div>
+          <div class="tl-axis">${axis.join('')}</div>
+        </div>
         <div class="legend">
-          <span><i style="background:var(--sleep-deep)"></i>Deep sleep</span>
-          <span><i style="background:var(--sleep-light)"></i>Light sleep</span>
-          <span><i style="background:var(--awake)"></i>Awake</span>
-          <span><i style="background:var(--nodata);border:1px solid var(--surface-line)"></i>No signal</span>
-        </div></div>`;
+          <span><i class="sw-o2"></i>Oxygen</span>
+          <span><i class="sw-dip">${'\\u2193'}</i>Dip under ${O2.warn}%</span>
+          <span><i class="sw-dip bad">${'\\u26A0\\uFE0E'}</i>Dip under ${O2.critical}%</span>
+          <span><i class="sw-deep"></i>Deep sleep</span>
+          <span><i class="sw-light"></i>Light sleep</span>
+          <span><i class="sw-awake"></i>Awake</span>
+          <span><i class="sw-nodata"></i>No signal</span>
+        </div>
+        ${renderEvents(dips)}
+        <p class="sr-only" id="tlLive" aria-live="polite"></p>
+      </section>`;
+    }
+
+    function defaultReadout() {
+      const dip = currentDips.find(d => d.start.getTime() === selectedDip);
+      if (dip) {
+        return `<b>Dip to ${Math.round(dip.min)}%</b> at ${fmtClock(dip.start)} — ${dipDepthText(dip)}. Outlined on the timeline and in the list below.`;
+      }
+      return currentDips.length
+        ? 'Move across the timeline to read any moment. Select a dip marker or an event below to find it in both places.'
+        : 'Move across the timeline to read any moment.';
+    }
+
+    function layoutMarks() {
+      const lane = document.querySelector('#tlPlot .tl-marks');
+      if (!lane) return;
+      const stems = document.querySelectorAll('#tlPlot .tl-stem');
+      const rights = [];   // right edge of the last marker placed in each row
+      lane.querySelectorAll('.tl-dip').forEach((pill, i) => {
+        const left = pill.offsetLeft - pill.offsetWidth / 2;
+        let row = rights.findIndex(right => right + 4 <= left);
+        if (row < 0) row = rights.length < 4 ? rights.length : rights.indexOf(Math.min(...rights));
+        rights[row] = left + pill.offsetWidth;
+        pill.style.top = (row * 30) + 'px';
+        if (stems[i]) stems[i].style.top = (row * 30 + 24) + 'px';
+      });
+      lane.style.height = (rights.length * 30) + 'px';
+      const nowMark = document.querySelector('#tlPlot .tl-now');
+      if (nowMark) nowMark.style.top = lane.style.height;
+    }
+
+    function wireTimeline() {
+      const plot = el('tlPlot');
+      if (!plot) return;
+      layoutMarks();
+      el('tlReadout').innerHTML = defaultReadout();
+      const read = event => {
+        const rect = plot.getBoundingClientRect();
+        if (!rect.width) return;
+        const frac = Math.max(0, Math.min(0.9999, (event.clientX - rect.left) / rect.width));
+        const t = tl.t0 + Math.floor(frac * tl.spanMs / tl.step) * tl.step;
+        const row = tl.byTime.get(t);
+        const parts = [`<b>${fmtClock(new Date(t))}</b>`];
+        if (!row) parts.push('no readings');
+        else {
+          if (row.min_oxygen_saturation != null) {
+            parts.push(`oxygen low ${Math.round(row.min_oxygen_saturation)}%`
+              + (row.avg_oxygen_saturation != null ? `, average ${row.avg_oxygen_saturation.toFixed(1)}%` : ''));
+          } else if (row.avg_oxygen_saturation != null) {
+            parts.push(`oxygen average ${row.avg_oxygen_saturation.toFixed(1)}%`);
+          }
+          if (row.avg_heart_rate != null) parts.push(`heart rate ${Math.round(row.avg_heart_rate)} bpm`);
+          parts.push(STAGE_WORDS[classify(row)]);
+        }
+        el('tlX').hidden = false;
+        el('tlX').style.left = (frac * 100).toFixed(2) + '%';
+        el('tlReadout').innerHTML = parts.join(' · ');
+      };
+      plot.addEventListener('pointermove', read);
+      plot.addEventListener('pointerdown', read);
+      plot.addEventListener('pointerleave', event => {
+        if (event.pointerType !== 'mouse') return;   // a touch reading stays put
+        el('tlX').hidden = true;
+        el('tlReadout').innerHTML = defaultReadout();
+      });
+    }
+
+    function applySelection(scrollTo) {
+      const idx = currentDips.findIndex(d => d.start.getTime() === selectedDip);
+      document.querySelectorAll('#content [data-dip]').forEach(node => {
+        const on = Number(node.dataset.dip) === idx;
+        node.setAttribute('aria-pressed', String(on));
+        const holder = node.closest('.event');
+        if (holder) holder.classList.toggle('selected', on);
+      });
+      const band = el('tlBand');
+      if (!band || !tl) return;
+      band.hidden = idx < 0;
+      if (idx >= 0) {
+        const dip = currentDips[idx];
+        band.style.left = ((dip.start.getTime() - tl.t0) / tl.spanMs * 100).toFixed(2) + '%';
+        band.style.width = ((dip.end - dip.start) / tl.spanMs * 100).toFixed(2) + '%';
+      }
+      el('tlX').hidden = true;
+      el('tlReadout').innerHTML = defaultReadout();
+      if (!scrollTo) return;
+      el('tlLive').textContent = idx >= 0
+        ? `Dip to ${Math.round(currentDips[idx].min)}% at ${fmtClock(currentDips[idx].start)} selected on the timeline and in the event list.`
+        : 'Selection cleared.';
+      if (idx < 0) return;
+      const target = scrollTo === 'timeline' ? el('tlPlot')
+        : document.querySelector(`#content .event[data-row="${idx}"]`);
+      const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (target) target.scrollIntoView({ block: 'nearest', behavior: calm ? 'auto' : 'smooth' });
+    }
+
+    function onDipClick(event) {
+      const button = event.target.closest('button[data-dip]');
+      const dip = button && currentDips[Number(button.dataset.dip)];
+      if (!dip) return;
+      const key = dip.start.getTime();
+      selectedDip = selectedDip === key ? null : key;
+      // picked on the timeline -> bring its list row into view, and vice versa
+      applySelection(button.closest('.tl-marks') ? 'list' : 'timeline');
     }
 
     function renderStats(stats, dips) {
+      const lowTier = stats.minO2 == null ? '' : stats.minO2 < O2.critical ? 'alert' : stats.minO2 < O2.warn ? 'warnish' : 'o2';
+      const lowFlag = lowTier === 'alert' ? `<span class="flag">${'\\u26A0\\uFE0E'} under ${O2.critical}%</span> · `
+        : lowTier === 'warnish' ? `<span class="flag">${'\\u2193'} under ${O2.warn}%</span> · ` : '';
       const minO2Text = stats.minO2 != null
-        ? `<b>${Math.round(stats.minO2)}%</b><span>lowest O₂</span><span class="sub">${stats.minO2At ? 'at ' + fmtClock(stats.minO2At) : ''}</span>` : `<b>—</b><span>lowest O₂</span>`;
+        ? `<b>${Math.round(stats.minO2)}%</b><span>lowest oxygen</span><span class="sub">${lowFlag}${stats.minO2At ? 'at ' + fmtClock(stats.minO2At) : ''}</span>` : `<b>—</b><span>lowest oxygen</span>`;
+      const worstBad = dips.some(dip => dipTier(dip) === 'bad');
+      const dipSub = !dips.length ? '<span class="sub">✓ none to review</span>'
+        : `<span class="sub"><span class="flag">${worstBad ? '\\u26A0\\uFE0E' : '\\u2193'}</span> ${worstBad ? `lowest went under ${O2.critical}%` : 'marked on the timeline'}</span>`;
       return `<div class="stats">
+        <div class="stat card o2"><b>${stats.avgO2 != null ? stats.avgO2.toFixed(1) + '%' : '—'}</b><span>average oxygen</span></div>
+        <div class="stat card ${lowTier}">${minO2Text}</div>
+        <div class="stat card ${!dips.length ? 'o2' : worstBad ? 'alert' : 'warnish'}"><b>${dips.length}</b><span>oxygen dips below ${O2.warn}%</span>${dipSub}</div>
         <div class="stat card"><b>${fmtDur(stats.sleep)}</b><span>total sleep</span>
           <span class="sub">${fmtDur(stats.deep)} deep · ${fmtDur(stats.awake)} awake</span></div>
-        <div class="stat card"><b>${stats.avgO2 != null ? stats.avgO2.toFixed(1) + '%' : '—'}</b><span>average O₂</span></div>
-        <div class="stat card ${stats.minO2 != null && stats.minO2 < O2.critical ? 'alert' : stats.minO2 != null && stats.minO2 < O2.warn ? 'warnish' : ''}">${minO2Text}</div>
-        <div class="stat card"><b>${stats.avgHr != null ? Math.round(stats.avgHr) : '—'}</b><span>avg heart rate (bpm)</span></div>
-        <div class="stat card ${dips.length ? 'alert' : 'calm'}"><b>${dips.length}</b><span>O₂ dips below ${O2.warn}%</span></div>
+        <div class="stat card hr"><b>${stats.avgHr != null ? Math.round(stats.avgHr) : '—'}</b><span>average heart rate (bpm)</span></div>
       </div>`;
     }
 
     function renderEvents(dips) {
       if (!dips.length) {
-        return `<section><h2 class="section-title">Oxygen events</h2><div class="events">
-          <div class="event card fine"><span class="tick">✓</span>No dips below ${O2.warn}% — nothing to review.</div>
-        </div></section>`;
+        return `<div class="ev-head"><h3>Oxygen events</h3></div><ul class="events">
+          <li class="event fine"><span class="tick" aria-hidden="true">✓</span>No dips below ${O2.warn}% — nothing to review.</li>
+        </ul>`;
       }
-      const items = dips.map(dip => {
+      const items = dips.map((dip, i) => {
         // center on the run's lowest bucket — the focus modal marks this moment
         const focus = new Date(dip.minAt.getTime() + BUCKET_SEC * 500).toISOString();
-        const label = encodeURIComponent(`Dip to ${Math.round(dip.min)}%`);
-        return `<a class="event card" href="/data?focus=${encodeURIComponent(focus)}&span=45&label=${label}"
-          title="Open the raw trace around this dip" style="text-decoration:none;color:inherit">
-        <time>${fmtClock(dip.start)}</time>
-        <span>${dipDepthText(dip)}</span>
-        <span class="depth">↓ ${Math.round(dip.min)}% →</span></a>`;
+        const low = Math.round(dip.min);
+        const label = encodeURIComponent(`Dip to ${low}%`);
+        return `<li class="event ${dipTier(dip)}" data-row="${i}">
+          <button type="button" class="ev-pick" data-dip="${i}" aria-pressed="false"
+            aria-label="${fmtClock(dip.start)}: dip to ${low}%, under ${dipUnder(dip)}%. ${dipDepthText(dip)}. Show it on the timeline.">
+            <time>${fmtClock(dip.start)}</time>
+            <span class="ev-text">${dipDepthText(dip)}</span>
+            <span class="ev-on">● on the timeline</span>
+            <span class="depth"><span aria-hidden="true">${dipGlyph(dip)}</span> ${low}%</span>
+          </button>
+          <a class="ev-trace" href="/data?focus=${encodeURIComponent(focus)}&span=45&label=${label}"
+            title="Open the raw trace around this dip"
+            aria-label="Open the raw trace around the ${fmtClock(dip.start)} dip">Trace →</a></li>`;
       }).join('');
-      return `<section><h2 class="section-title">Oxygen events</h2><div class="events">${items}</div></section>`;
+      return `<div class="ev-head"><h3>Oxygen events</h3>
+          <span>Select one to find it on the timeline</span></div>
+        <ul class="events">${items}</ul>`;
     }
 
     function renderWeek() {
@@ -297,7 +611,7 @@ NIGHT_SCRIPTS = """<script>
         const detail = stats.sleep
           ? `${fmtDur(stats.deep)} deep · ${fmtDur(Math.max(0, stats.sleep - stats.deep))} light · ${fmtDur(stats.awake)} awake`
           : 'no readings';
-        bars.push(`<div class="wb ${offset === 0 ? 'tonight' : ''}" title="${detail}">
+        bars.push(`<div class="wb ${offset === 0 ? 'tonight' : ''}${offset === nightOffset ? ' shown' : ''}" title="${detail}">
           <b>${stats.sleep ? fmtDur(stats.sleep) : ''}</b>
           <i style="height:${Math.max(3, height)}%">
             <u class="lt"></u><u class="dp" style="height:${Math.round(deepFrac * 100)}%"></u>
@@ -328,14 +642,23 @@ NIGHT_SCRIPTS = """<script>
         fragment('awake overnight', s => s.awake),
       ].filter(Boolean);
       const note = parts.length ? `Averaging ${parts.join(', ')} per night.` : '';
-      return `<section><div class="week card"><h2 class="section-title">The last seven nights</h2>
+      return `<section><div class="week card"><h2 class="card-title">The last seven nights</h2>
         <div class="week-bars">${bars.join('')}</div>
         <div class="legend">
-          <span><i style="background:var(--sleep-deep)"></i>Deep</span>
-          <span><i style="background:var(--sleep-light)"></i>Light</span>
+          <span><i class="sw-deep"></i>Deep</span>
+          <span><i class="sw-light"></i>Light</span>
+          <span>Underlined: the night shown above</span>
         </div>
         ${note ? `<p class="week-note">${provisional}${note}</p>` : ''}
         </div></section>`;
+    }
+
+    function headline(stats, win, enough) {
+      if (!enough) return win.inProgress ? 'Nothing recorded yet tonight' : 'No night recorded';
+      if (stats.sleep < 60) return win.inProgress ? 'No sleep recorded so far' : 'No sleep recorded';
+      const slept = `Slept <b>${fmtDur(stats.sleep)}</b>`;
+      if (win.inProgress) return `${slept} so far`;
+      return nightOffset === 0 ? `${slept} last night` : slept;
     }
 
     function render() {
@@ -343,19 +666,34 @@ NIGHT_SCRIPTS = """<script>
       const buckets = bucketsIn(win);
       const stats = nightStats(buckets);
       const dips = dipEvents(buckets);
+      const enough = !!stats.coveredSec && stats.coveredSec >= 1800;
       const label = win.start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
-      el('nightTitle').childNodes[0].textContent = nightOffset === 0 ? (win.inProgress ? 'Tonight' : 'Last night') : 'The night of';
+      if (shownOffset !== nightOffset) { selectedDip = null; shownOffset = nightOffset; }
+      el('nightKicker').textContent = nightOffset === 0 ? (win.inProgress ? 'Tonight' : 'Last night') : 'The night of';
       el('nightSub').textContent = `${label}${win.inProgress ? ' · still collecting' : ''}`;
+      el('nightTitle').innerHTML = headline(stats, win, enough);
       el('lede').innerHTML = narrative(stats, dips, win.inProgress);
       el('nextNight').disabled = nightOffset === 0;
       el('prevNight').disabled = nightOffset >= 6;
-      if (!stats.coveredSec || stats.coveredSec < 1800) {
-        el('content').innerHTML = `<div class="empty">No night to report here yet.<br/>
+      // a background refresh must not drop keyboard focus from a dip control
+      const held = document.activeElement && document.activeElement.closest
+        && document.activeElement.closest('#content button[data-dip]');
+      const heldSelector = held
+        ? `#content ${held.classList.contains('tl-dip') ? '.tl-dip' : '.ev-pick'}[data-dip="${held.dataset.dip}"]` : null;
+      if (!enough) {
+        currentDips = []; tl = null;
+        el('content').innerHTML = `<div class="empty card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.6A8.6 8.6 0 1 1 9.4 4a6.9 6.9 0 0 0 10.6 10.6z"/></svg>
+          <b>No night to report here yet.</b>
           Readings appear once the sock has been worn overnight.</div>` + renderWeek();
         return;
       }
-      el('content').innerHTML = renderStats(stats, dips) + renderTimeline(win, buckets)
-        + renderEvents(dips) + renderWeek();
+      currentDips = dips;
+      el('content').innerHTML = renderTimeline(win, buckets, dips) + renderStats(stats, dips) + renderWeek();
+      wireTimeline();
+      applySelection(null);
+      const again = heldSelector && document.querySelector(heldSelector);
+      if (again) again.focus({ preventScroll: true });
     }
 
     async function boot() {
@@ -371,10 +709,13 @@ NIGHT_SCRIPTS = """<script>
         O2 = window.owletO2(prefs);
         NIGHT = nightWindowFrom(prefs);
       } catch (error) {
+        el('nightSub').textContent = 'could not load';
         el('lede').textContent = 'Could not load readings — is the collector running?';
         return;
       }
       render();
+      el('content').addEventListener('click', onDipClick);
+      window.addEventListener('resize', layoutMarks);
       el('prevNight').addEventListener('click', () => { nightOffset = Math.min(6, nightOffset + 1); render(); });
       el('nextNight').addEventListener('click', () => { nightOffset = Math.max(0, nightOffset - 1); render(); });
       setInterval(async () => {   // keep "still collecting" nights fresh
