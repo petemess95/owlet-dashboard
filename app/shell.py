@@ -233,6 +233,22 @@ SHELL_JS = """<script>
       pane.classList.toggle('active', pane.dataset.pane === name);
     });
     localStorage.setItem('owletSettingsPane', name);
+    if (name === 'desktop' && desktopSettings) desktopSettings.refresh();
+  }
+  // ---- "This PC" pane (desktop app only) ----
+  // The pane lives in an inert <template> and is only cloned into the modal
+  // when the server says desktop_mode AND the Tauri invoke bridge exists.
+  var desktopSettings = null;
+  function mountDesktopSettings() {
+    var invoke = tauriInvoke();
+    if (desktopSettings || !desktopMode || !invoke || !window.owletDesktopSettings) return;
+    try {
+      desktopSettings = window.owletDesktopSettings.mount(invoke, { showPane: showSettingsPane });
+    } catch (error) { desktopSettings = null; }
+    if (desktopSettings && settingsBackdrop && !settingsBackdrop.hidden
+        && localStorage.getItem('owletSettingsPane') === 'desktop') {
+      showSettingsPane('desktop');
+    }
   }
   document.querySelectorAll('.set-rail [data-pane]').forEach(function (tab) {
     tab.addEventListener('click', function () { showSettingsPane(tab.dataset.pane); });
@@ -395,6 +411,7 @@ SHELL_JS = """<script>
       byId('o2CritSetting').value = String(tiers.critical);
     }
     var prefs = (account && account.dashboard_preferences) || {};
+    renderAlertTiming(prefs, false);
     if (byId('birthDateSetting') && document.activeElement !== byId('birthDateSetting')) {
       byId('birthDateSetting').value = prefs.birth_date || '';
       var hint = byId('birthDateHint');
@@ -553,6 +570,66 @@ SHELL_JS = """<script>
   }
   ['o2WarnSetting', 'o2CritSetting'].forEach(function (id) {
     if (byId(id)) byId(id).addEventListener('change', saveO2Tiers);
+  });
+  // Snooze length / stale timeout / awake chime, per account. The server
+  // clamps out-of-range seconds; we show whatever it saved. Unset shows the
+  // server default (15 s / 60 s / off).
+  var ALERT_TIMING = [
+    { id: 'alertSnoozeSetting', msg: 'alertSnoozeMsg', key: 'alert_snooze_seconds', min: 5, max: 120, def: 15 },
+    { id: 'alertStaleSetting', msg: 'alertStaleMsg', key: 'alert_stale_seconds', min: 30, max: 300, def: 60 }
+  ];
+  function savedSeconds(prefs, spec) {
+    var n = Number(prefs && prefs[spec.key]);
+    return (prefs && prefs[spec.key] != null && isFinite(n)) ? Math.round(n) : spec.def;
+  }
+  function renderAlertTiming(prefs, force) {
+    (ALERT_TIMING || []).forEach(function (spec) {
+      var input = byId(spec.id);
+      if (input && (force || document.activeElement !== input)) input.value = String(savedSeconds(prefs, spec));
+    });
+    var chime = byId('awakeChimeSetting');
+    if (chime) {
+      chime.checked = !!(prefs && prefs.awake_chime === true);
+      if (byId('awakeChimeState')) byId('awakeChimeState').textContent = chime.checked ? 'On' : 'Off';
+    }
+  }
+  function sayIn(id, text, tone) {
+    var el = byId(id);
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'ds-msg' + (tone ? ' ' + tone : '');
+  }
+  ALERT_TIMING.forEach(function (spec) {
+    var input = byId(spec.id);
+    if (!input) return;
+    input.addEventListener('change', function () {
+      var n = Math.round(Number(input.value));
+      if (input.value === '' || !isFinite(n)) {
+        renderAlertTiming(shellPrefs() || {}, true);
+        sayIn(spec.msg, 'Enter a number of seconds from ' + spec.min + ' to ' + spec.max + '.', 'bad');
+        return;
+      }
+      var patch = {};
+      patch[spec.key] = n;
+      sayIn(spec.msg, 'Saving…', '');
+      patchSelectedAccount({ dashboard_preferences: patch }).then(function (account) {
+        var prefs = (account && account.dashboard_preferences) || shellPrefs() || {};
+        renderAlertTiming(prefs, true);
+        if (!account) { sayIn(spec.msg, 'Could not save — the previous value is kept.', 'bad'); return; }
+        var saved = savedSeconds(prefs, spec);
+        sayIn(spec.msg, saved === n ? 'Saved: ' + saved + ' s.'
+          : 'Saved as ' + saved + ' s — the allowed range is ' + spec.min + '–' + spec.max + ' s.',
+          saved === n ? 'good' : '');
+      });
+    });
+  });
+  if (byId('awakeChimeSetting')) byId('awakeChimeSetting').addEventListener('change', function (event) {
+    var wanted = !!event.target.checked;
+    sayIn('awakeChimeMsg', 'Saving…', '');
+    patchSelectedAccount({ dashboard_preferences: { awake_chime: wanted } }).then(function (account) {
+      renderAlertTiming((account && account.dashboard_preferences) || shellPrefs() || {}, true);
+      sayIn('awakeChimeMsg', account ? '' : 'Could not save — the previous setting is kept.', account ? '' : 'bad');
+    });
   });
   if (byId('o2AlertSetting')) byId('o2AlertSetting').addEventListener('change', function (event) {
     var value = event.target.value;
@@ -1262,6 +1339,9 @@ SHELL_JS = """<script>
     if (localStorage.getItem('owletSettingsPane') === 'signin') {
       localStorage.setItem('owletSettingsPane', 'baby');
     }
+    // The "This PC" settings tab exists only here: desktop mode AND the Tauri
+    // bridge. Hosted pages never get the tab, the pane, or an invoke call.
+    mountDesktopSettings();
     if (localStorage.getItem('owletDesktopNoticeAck') === '1') return;
     var main = document.querySelector('.shell-main');
     if (!main) return;
@@ -1384,6 +1464,749 @@ SHELL_JS = """<script>
 </script>"""
 
 
+# Small layout rules for the alert settings rows and the desktop-only "This PC"
+# pane. Theme tokens only, so both themes follow theme.css.
+SETTINGS_CSS = """<style>
+.ds-ctl { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ds-inline { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ds-inline > input[type="number"] { flex: 1; min-width: 0; }
+.ds-msg { display: block; font-size: 12px; line-height: 1.4; color: var(--dim); }
+.ds-msg.bad { color: var(--bad); }
+.ds-msg.good { color: var(--good); }
+.set-row .ds-switch { display: flex; align-items: center; gap: 10px; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--dim); }
+.set-row .ds-switch input { width: 18px; height: 18px; margin: 0; padding: 0; flex: none;
+  accent-color: var(--accent); cursor: pointer; }
+.set-row input[type="range"] { flex: 1; min-width: 0; padding: 0; border: 0; background: none;
+  accent-color: var(--accent); }
+.set-row input:disabled, .set-row select:disabled { opacity: .5; cursor: default; }
+.ds-out { flex: none; min-width: 4ch; text-align: right; font-size: 13px; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+.ds-note { font-size: 12.5px; line-height: 1.5; color: var(--dim); margin: 10px 0 4px;
+  padding: 10px 14px; border-radius: 18px; background: var(--surface-inset);
+  border: 1px solid var(--surface-line); }
+.ds-note b { color: var(--ink); }
+.ds-card { display: grid; gap: 10px; margin: 12px 0 4px; padding: 14px;
+  border-radius: 18px; background: var(--surface-inset); border: 1px solid var(--surface-line); }
+.ds-card[hidden], .set-row[hidden], .ds-capture[hidden] { display: none; }
+.ds-card > b { font-size: 13.5px; }
+.ds-card .pp-link-btn { text-align: center; justify-self: start; }
+.ds-card .pp-link-btn:disabled { opacity: .5; cursor: default; }
+.ds-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ds-btn { all: unset; box-sizing: border-box; cursor: pointer; text-align: center;
+  padding: 8px 12px; border-radius: var(--radius-control); border: 1px solid var(--surface-line);
+  color: var(--dim); font-size: 13px; font-weight: 600; }
+.ds-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.ds-btn:disabled { opacity: .5; cursor: default; }
+.ds-capture { all: unset; box-sizing: border-box; cursor: pointer; flex: 1; min-width: 0;
+  padding: 8px 14px; border-radius: var(--radius-control); border: 1px solid var(--surface-line);
+  background: var(--surface-inset); color: var(--ink); font-size: 13.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-capture.unset { color: var(--dim); }
+.ds-capture.armed { color: var(--accent); border-color: var(--accent); }
+.ds-capture:disabled { opacity: .5; cursor: default; }
+.ds-btn:focus-visible, .ds-capture:focus-visible, .ds-card .pp-link-btn:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+.ds-group { margin: 22px 0 0; }
+.ds-group + .set-lede { margin-top: 2px; }
+</style>"""
+
+# The desktop-only "This PC" tab and pane. A <template> is inert: in hosted mode
+# none of this is rendered, focusable or read by a screen reader. SHELL_JS
+# clones it into the settings modal only in desktop mode with the Tauri bridge.
+DESKTOP_SETTINGS_TEMPLATE = """  <template id="desktopSettingsTpl">
+    <button type="button" role="tab" data-pane="desktop" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+      <span>This PC</span>
+    </button>
+    <section class="set-pane" data-pane="desktop" aria-label="This PC">
+      <h3>This PC</h3>
+      <p class="set-lede">How this computer flashes, sounds and responds to keys when an alert
+        fires. These settings are kept on this PC only.</p>
+      <p class="ds-note"><b>What “Alerts armed” means.</b> The armed indicator says this PC's
+        alert path is working — the server answers, data is fresh, sound can play and the PC
+        stays awake. It says nothing about your baby. This is not a medical alarm: the Owlet
+        base station stays the primary alarm.</p>
+      <p class="ds-msg bad" id="dsLoadMsg" role="alert"></p>
+
+      <div class="ds-card" id="dsFirstRun" hidden>
+        <b>Test your alerts</b>
+        <small class="ds-msg">Fire one amber and one red test, then confirm you saw the flash and
+          heard the alarm on this PC.</small>
+        <div class="ds-actions">
+          <button class="ds-btn" type="button" data-test="amber">Test amber</button>
+          <button class="ds-btn" type="button" data-test="red">Test red</button>
+        </div>
+        <small class="ds-msg" data-msg="test" aria-live="polite"></small>
+        <button class="pp-link-btn" type="button" id="dsFirstRunDone" disabled
+          aria-describedby="dsFirstRunMsg">I saw and heard both</button>
+        <small class="ds-msg" id="dsFirstRunMsg" data-msg="first_run_test_done" aria-live="polite"></small>
+      </div>
+
+      <div class="set-row" id="dsTestRow">
+        <div class="set-lab"><b>Test alerts</b><small>Test red uses the real alarm path, so you
+          hear the volume you chose. Each test runs for 20 seconds.</small></div>
+        <div class="ds-ctl">
+          <div class="ds-actions">
+            <button class="ds-btn" type="button" data-test="amber">Test amber</button>
+            <button class="ds-btn" type="button" data-test="red">Test red</button>
+          </div>
+          <small class="ds-msg" data-msg="test" aria-live="polite"></small>
+        </div>
+      </div>
+
+      <span class="pp-label ds-group">Flash and sound</span>
+      <div class="set-row">
+        <div class="set-lab"><b><label for="dsFlashTarget">Flash target</label></b><small
+          id="dsFlashHint">Where the alert flash appears.</small></div>
+        <div class="ds-ctl">
+          <select id="dsFlashTarget" data-key="flash_target" aria-describedby="dsFlashHint"></select>
+          <small class="ds-msg" data-msg="flash_target" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b><label for="dsAlarmSound">Alarm sound</label></b><small
+          id="dsSoundHint">Beep is the sound earlier versions used.</small></div>
+        <div class="ds-ctl">
+          <select id="dsAlarmSound" data-key="alarm_sound" aria-describedby="dsSoundHint"></select>
+          <small class="ds-msg" data-msg="alarm_sound" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b><label for="dsAlarmDevice">Alarm device</label></b><small
+          id="dsDeviceHint">“All outputs” plays on every active speaker and headset.</small></div>
+        <div class="ds-ctl">
+          <select id="dsAlarmDevice" data-key="alarm_device" aria-describedby="dsDeviceHint"></select>
+          <small class="ds-msg" data-msg="alarm_device" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b id="dsUnmuteLab">Unmute and raise volume on red</b><small
+          id="dsUnmuteHint">A red alert unmutes this PC and raises the volume, then restores mute
+          and volume when the alert ends. With this off, the alarm plays at the current volume
+          and a muted PC is reported as a problem.</small></div>
+        <div class="ds-ctl">
+          <label class="ds-switch"><input type="checkbox" role="switch" data-key="unmute_on_red"
+            aria-labelledby="dsUnmuteLab" aria-describedby="dsUnmuteHint" /><span
+            data-state="unmute_on_red">On</span></label>
+          <small class="ds-msg" data-msg="unmute_on_red" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b><label for="dsAlarmVolume">Alarm volume level</label></b><small
+          id="dsVolumeHint">The level a red alert raises the volume to. It only ever raises the
+          volume: a PC already louder is left alone. Needs the switch above.</small></div>
+        <div class="ds-ctl">
+          <div class="ds-inline">
+            <input id="dsAlarmVolume" type="range" min="20" max="100" step="1" data-key="alarm_volume"
+              aria-describedby="dsVolumeHint" />
+            <output class="ds-out" id="dsAlarmVolumeOut" for="dsAlarmVolume">60%</output>
+          </div>
+          <small class="ds-msg" data-msg="alarm_volume" aria-live="polite"></small>
+        </div>
+      </div>
+
+      <span class="pp-label ds-group">Hotkeys</span>
+      <p class="set-lede">They work while a game or another app has focus. Click a field, then
+        press the keys: use Ctrl, Alt, Shift or Win with a key; F1–F24 can be used alone.
+        Esc cancels.</p>
+      <div class="set-row">
+        <div class="set-lab"><b id="dsHkSnoozeLab">Snooze</b><small id="dsHkSnoozeHint">Silences the
+          alert for the snooze length set under Alerts.</small></div>
+        <div class="ds-ctl">
+          <div class="ds-inline">
+            <button type="button" class="ds-capture" data-hotkey="hotkey_snooze" data-name="Snooze"
+              aria-describedby="dsHkSnoozeHint"></button>
+            <button type="button" class="ds-btn" data-clear="hotkey_snooze"
+              aria-label="Clear the Snooze hotkey">Clear</button>
+          </div>
+          <small class="ds-msg" data-msg="hotkey_snooze" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b id="dsHkAckLab">“I'm checking”</b><small id="dsHkAckHint">Acknowledge:
+          the longer silence that says you're on your way.</small></div>
+        <div class="ds-ctl">
+          <div class="ds-inline">
+            <button type="button" class="ds-capture" data-hotkey="hotkey_acknowledge"
+              data-name="I'm checking" aria-describedby="dsHkAckHint"></button>
+            <button type="button" class="ds-btn" data-clear="hotkey_acknowledge"
+              aria-label="Clear the I'm checking hotkey">Clear</button>
+          </div>
+          <small class="ds-msg" data-msg="hotkey_acknowledge" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b id="dsHkWidgetLab">Show/hide widget</b><small id="dsHkWidgetHint">Shows
+          or hides the small always-on-top widget.</small></div>
+        <div class="ds-ctl">
+          <div class="ds-inline">
+            <button type="button" class="ds-capture" data-hotkey="hotkey_widget"
+              data-name="Show/hide widget" aria-describedby="dsHkWidgetHint"></button>
+            <button type="button" class="ds-btn" data-clear="hotkey_widget"
+              aria-label="Clear the Show/hide widget hotkey">Clear</button>
+          </div>
+          <small class="ds-msg" data-msg="hotkey_widget" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b id="dsHkClickLab">Toggle click-through</b><small
+          id="dsHkClickHint">Lets clicks pass through the widget to the window under it.</small></div>
+        <div class="ds-ctl">
+          <div class="ds-inline">
+            <button type="button" class="ds-capture" data-hotkey="hotkey_click_through"
+              data-name="Toggle click-through" aria-describedby="dsHkClickHint"></button>
+            <button type="button" class="ds-btn" data-clear="hotkey_click_through"
+              aria-label="Clear the Toggle click-through hotkey">Clear</button>
+          </div>
+          <small class="ds-msg" data-msg="hotkey_click_through" aria-live="polite"></small>
+        </div>
+      </div>
+
+      <span class="pp-label ds-group">Controller</span>
+      <div class="set-row">
+        <div class="set-lab"><b><label for="dsControllerMode">Controller snooze</label></b><small
+          id="dsControllerHint">Snooze with a button or combination you choose on the controller in
+          your hands. Presses only count while an amber or red alert is showing. Presses in the
+          first 2 seconds of each alert are ignored — and again each time it comes back after a
+          snooze or turns red — so the flash and sound always get at least that long. A button
+          already held when the alert appears doesn't count. It only snoozes, never “I'm
+          checking”, and the game still receives the press. Xbox-style (XInput) controllers only;
+          PlayStation and Switch pads need Steam Input.</small></div>
+        <div class="ds-ctl">
+          <select id="dsControllerMode" data-key="controller_mode" aria-describedby="dsControllerHint">
+            <option value="off">Off</option>
+            <option value="chosen">Chosen button</option>
+          </select>
+          <button type="button" class="ds-capture" id="dsControllerCapture" hidden
+            aria-describedby="dsControllerSaved dsControllerMsg">Press a button</button>
+          <small class="ds-msg" id="dsControllerSaved"></small>
+          <small class="ds-msg" id="dsControllerMsg" data-msg="controller_mode" aria-live="polite"></small>
+        </div>
+      </div>
+
+      <span class="pp-label ds-group">Startup and games</span>
+      <div class="set-row">
+        <div class="set-lab"><b id="dsAutostartLab">Start at login</b><small id="dsAutostartHint">Starts
+          hidden, with the widget shown.</small></div>
+        <div class="ds-ctl">
+          <label class="ds-switch"><input type="checkbox" role="switch" data-key="autostart"
+            aria-labelledby="dsAutostartLab" aria-describedby="dsAutostartHint" /><span
+            data-state="autostart">Off</span></label>
+          <small class="ds-msg" data-msg="autostart" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b id="dsKeepAwakeLab">Keep this PC awake while monitoring</b><small
+          id="dsKeepAwakeHint">Stops the PC sleeping on its idle timer while readings are being
+          collected. The display may still turn off.</small></div>
+        <div class="ds-ctl">
+          <label class="ds-switch"><input type="checkbox" role="switch" data-key="keep_awake"
+            aria-labelledby="dsKeepAwakeLab" aria-describedby="dsKeepAwakeHint" /><span
+            data-state="keep_awake">On</span></label>
+          <small class="ds-msg" data-msg="keep_awake" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b><label for="dsGameMode">Game mode</label></b><small
+          id="dsGameHint">Automatic flashes every monitor and shrinks the widget when a fullscreen
+          game is running. Always does that all the time; Never keeps your usual flash target and
+          widget size.</small></div>
+        <div class="ds-ctl">
+          <select id="dsGameMode" data-key="game_mode" aria-describedby="dsGameHint"></select>
+          <small class="ds-msg" data-msg="game_mode" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-lab"><b id="dsCaptureLab">Hide from screen capture</b><small
+          id="dsCaptureHint">Keeps the widget and alert overlay out of OBS and Discord screen
+          shares. They stay visible on your own screen.</small></div>
+        <div class="ds-ctl">
+          <label class="ds-switch"><input type="checkbox" role="switch" data-key="capture_exclusion"
+            aria-labelledby="dsCaptureLab" aria-describedby="dsCaptureHint" /><span
+            data-state="capture_exclusion">Off</span></label>
+          <small class="ds-msg" data-msg="capture_exclusion" aria-live="polite"></small>
+        </div>
+      </div>
+    </section>
+  </template>"""
+
+# Behaviour for the "This PC" pane. Defines window.owletDesktopSettings; nothing
+# here touches the page or calls the Tauri bridge until SHELL_JS calls mount()
+# in desktop mode. Raw string: the regexes keep their backslashes.
+DESKTOP_SETTINGS_JS = r"""<script>
+(function () {
+  'use strict';
+  // Contract defaults (docs/orchestration-v0.2.md section 4). Shown whenever a
+  // key is missing, never sent on their own.
+  var DEFAULTS = {
+    flash_target: 'secondary', alarm_sound: 'beep', alarm_device: 'default',
+    unmute_on_red: true, alarm_volume: 60,
+    hotkey_snooze: null, hotkey_acknowledge: null, hotkey_widget: null, hotkey_click_through: null,
+    controller_mode: 'off', controller_buttons: null,
+    autostart: false, keep_awake: true, game_mode: 'auto', capture_exclusion: false,
+    first_run_test_done: false
+  };
+  var HOTKEY_KEYS = ['hotkey_snooze', 'hotkey_acknowledge', 'hotkey_widget', 'hotkey_click_through'];
+  var SWITCH_KEYS = ['unmute_on_red', 'autostart', 'keep_awake', 'capture_exclusion'];
+  var VOLUME_MIN = 20, VOLUME_MAX = 100;
+
+  // ---- hotkey strings: Ctrl, Alt, Shift, Super, then KeyboardEvent.code ----
+  var MODIFIER_CODE = /^(Control|Alt|Shift|Meta|OS)(Left|Right)?$|^AltGraph$/;
+  var MODIFIER_KEY = /^(Control|Alt|Shift|Meta|OS|AltGraph|Super|Hyper)$/;
+  var FUNCTION_KEY = /^F([1-9]|1[0-9]|2[0-4])$/;
+  // Returns {combo} | {modifierOnly: true} | {error}.
+  function hotkeyFromEvent(event) {
+    var code = String((event && event.code) || '');
+    var key = String((event && event.key) || '');
+    if (MODIFIER_CODE.test(code) || MODIFIER_KEY.test(key)) return { modifierOnly: true };
+    if (!code || code === 'Unidentified') return { error: 'That key can’t be used for a hotkey.' };
+    var mods = [];
+    if (event.ctrlKey) mods.push('Ctrl');
+    if (event.altKey) mods.push('Alt');
+    if (event.shiftKey) mods.push('Shift');
+    if (event.metaKey) mods.push('Super');
+    if (!mods.length && !FUNCTION_KEY.test(code)) {
+      return { error: 'Add Ctrl, Alt, Shift or Win. Only F1–F24 can be used on their own.' };
+    }
+    return { combo: mods.concat([code]).join('+') };
+  }
+  var MODIFIER_NAMES = { Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Super: 'Win' };
+  var KEY_NAMES = {
+    Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']',
+    Backslash: '\\', IntlBackslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.',
+    Slash: '/', Space: 'Space', Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace',
+    Delete: 'Delete', Insert: 'Insert', Home: 'Home', End: 'End', PageUp: 'Page Up',
+    PageDown: 'Page Down', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left',
+    ArrowRight: 'Right', Pause: 'Pause', PrintScreen: 'Print Screen', ScrollLock: 'Scroll Lock',
+    CapsLock: 'Caps Lock', NumLock: 'Num Lock', ContextMenu: 'Menu', Escape: 'Esc',
+    NumpadAdd: 'Num +', NumpadSubtract: 'Num -', NumpadMultiply: 'Num *',
+    NumpadDivide: 'Num /', NumpadDecimal: 'Num .', NumpadEnter: 'Num Enter'
+  };
+  function keyName(code) {
+    if (Object.prototype.hasOwnProperty.call(KEY_NAMES, code)) return KEY_NAMES[code];
+    var m = /^Key([A-Z])$/.exec(code) || /^Digit([0-9])$/.exec(code);
+    if (m) return m[1];
+    m = /^Numpad([0-9])$/.exec(code);
+    if (m) return 'Num ' + m[1];
+    return code;
+  }
+  function hotkeyLabel(combo) {
+    if (!combo) return 'Not set';
+    var parts = String(combo).split('+');
+    return parts.map(function (part, i) {
+      return i < parts.length - 1 ? (MODIFIER_NAMES[part] || part) : keyName(part);
+    }).join(' + ');
+  }
+
+  // ---- XInput button mask -> names ----
+  var XINPUT_BUTTONS = [
+    [0x0001, 'D-pad up'], [0x0002, 'D-pad down'], [0x0004, 'D-pad left'], [0x0008, 'D-pad right'],
+    [0x0010, 'Menu (Start)'], [0x0020, 'View (Back)'],
+    [0x0040, 'Left stick click'], [0x0080, 'Right stick click'],
+    [0x0100, 'LB'], [0x0200, 'RB'],
+    [0x1000, 'A'], [0x2000, 'B'], [0x4000, 'X'], [0x8000, 'Y']
+  ];
+  function buttonNames(mask) {
+    mask = Number(mask);
+    if (!isFinite(mask) || mask <= 0) return [];
+    mask = mask & 0xFFFF;
+    var names = [], known = 0;
+    XINPUT_BUTTONS.forEach(function (b) {
+      known |= b[0];
+      if (mask & b[0]) names.push(b[1]);
+    });
+    for (var bit = 1; bit <= 0x8000; bit <<= 1) {
+      if ((mask & bit) && !(known & bit)) names.push('Button 0x' + ('000' + bit.toString(16).toUpperCase()).slice(-4));
+    }
+    return names;
+  }
+  function validMask(value) {
+    var n = Number(value);
+    return (isFinite(n) && Math.floor(n) === n && n > 0 && n <= 0xFFFF) ? n : 0;
+  }
+
+  // A rejected invoke usually means this build lacks the command.
+  function invokeProblem(error, fallback) {
+    var text = String((error && (error.message || error)) || '');
+    if (/not found|not allowed|unknown command|denied|permission/i.test(text) || !text) return fallback;
+    return fallback + ' (' + text.slice(0, 120) + ')';
+  }
+
+  function mount(invoke, hooks) {
+    var tpl = document.getElementById('desktopSettingsTpl');
+    var rail = document.querySelector('.set-rail');
+    var panes = document.querySelector('.set-panes');
+    if (!tpl || !tpl.content || !rail || !panes) return null;
+    if (panes.querySelector('.set-pane[data-pane="desktop"]')) return null;
+    var fragment = tpl.content.cloneNode(true);
+    var tab = fragment.querySelector('[role="tab"][data-pane="desktop"]');
+    var pane = fragment.querySelector('.set-pane[data-pane="desktop"]');
+    rail.appendChild(tab);
+    panes.appendChild(pane);
+    tab.addEventListener('click', function () { if (hooks && hooks.showPane) hooks.showPane('desktop'); });
+
+    var q = function (sel) { return pane.querySelector(sel); };
+    var qa = function (sel) { return Array.prototype.slice.call(pane.querySelectorAll(sel)); };
+    var settings = null;        // last object the shell returned; never edited locally
+    var loadFailed = false;
+    var loading = null;
+    var monitors = null, devices = null;
+    var pending = {};           // field -> true while a save is in flight
+    var capturing = null;       // hotkey key being captured
+    var controllerCapture = null;
+    var tested = { amber: false, red: false };
+
+    function call(name, args) {
+      try { return Promise.resolve(args === undefined ? invoke(name) : invoke(name, args)); }
+      catch (error) { return Promise.reject(error); }
+    }
+    function get(key) {
+      var value = settings ? settings[key] : undefined;
+      return (value === undefined || value === null) ? DEFAULTS[key] : value;
+    }
+    function msgEl(field) { return q('[data-msg="' + field + '"]'); }
+    function say(field, text, tone) {
+      var el = typeof field === 'string' ? msgEl(field) : field;
+      if (!el) return;
+      el.textContent = text || '';
+      el.className = 'ds-msg' + (tone ? ' ' + tone : '');
+    }
+
+    // ---- render everything from the last saved settings ----
+    function fillSelect(select, options, current, missingLabel) {
+      if (!select) return;
+      var list = options.slice();
+      var present = list.some(function (o) { return o[0] === current; });
+      if (!present && current != null && current !== '') list.push([current, missingLabel]);
+      select.textContent = '';
+      list.forEach(function (o) {
+        var option = document.createElement('option');
+        option.value = o[0];
+        option.textContent = o[1];
+        select.appendChild(option);
+      });
+      select.value = current;
+    }
+    function render() {
+      var ready = !!settings && !loadFailed;
+      var showFirstRun = ready && get('first_run_test_done') !== true;
+      q('#dsFirstRun').hidden = !showFirstRun;
+      q('#dsTestRow').hidden = showFirstRun;
+      q('#dsFirstRunDone').disabled = !(tested.amber && tested.red) || !!pending.first_run_test_done;
+
+      fillSelect(q('#dsFlashTarget'), [
+        ['secondary', 'Secondary monitor'], ['primary_border', 'Primary monitor border'],
+        ['all', 'All monitors']
+      ].concat((monitors || []).filter(function (m) { return m && m.id != null; }).map(function (m) {
+        return [String(m.id), String(m.name || m.id)];
+      })), String(get('flash_target')), 'Saved display (not connected)');
+      fillSelect(q('#dsAlarmSound'), [['beep', 'Beep'], ['two_tone', 'Two-tone'], ['pulse', 'Pulse']],
+        String(get('alarm_sound')), 'Saved sound (' + get('alarm_sound') + ')');
+      fillSelect(q('#dsAlarmDevice'), [['default', 'Default device'], ['all', 'All outputs']]
+        .concat((devices || []).filter(function (d) { return d && d.id != null; }).map(function (d) {
+          return [String(d.id), String(d.name || d.id)];
+        })), String(get('alarm_device')), 'Saved device (not connected)');
+      fillSelect(q('#dsGameMode'), [['auto', 'Automatic'], ['always', 'Always'], ['never', 'Never']],
+        String(get('game_mode')), 'Saved (' + get('game_mode') + ')');
+
+      SWITCH_KEYS.forEach(function (key) {
+        var input = q('input[data-key="' + key + '"]');
+        input.checked = get(key) === true;
+        q('[data-state="' + key + '"]').textContent = input.checked ? 'On' : 'Off';
+      });
+
+      var volume = q('#dsAlarmVolume');
+      var level = Math.min(VOLUME_MAX, Math.max(VOLUME_MIN, Math.round(Number(get('alarm_volume')) || DEFAULTS.alarm_volume)));
+      volume.value = String(level);
+      q('#dsAlarmVolumeOut').textContent = level + '%';
+
+      HOTKEY_KEYS.forEach(function (key) {
+        var button = q('[data-hotkey="' + key + '"]');
+        var combo = get(key);
+        var name = button.getAttribute('data-name');
+        if (capturing === key) {
+          button.textContent = 'Press keys… (Esc cancels)';
+          button.className = 'ds-capture armed';
+          button.setAttribute('aria-label', name + ' hotkey: waiting for keys. Esc cancels.');
+        } else {
+          button.textContent = hotkeyLabel(combo);
+          button.className = 'ds-capture' + (combo ? '' : ' unset');
+          button.setAttribute('aria-label', name + ' hotkey: ' + hotkeyLabel(combo) + '. Press to change.');
+        }
+        button.disabled = !ready || !!pending[key];
+        q('[data-clear="' + key + '"]').disabled = !ready || !combo || !!pending[key] || capturing === key;
+      });
+
+      // Only "off" and "chosen" exist in v0.2. Anything else (an old "any")
+      // is shown as Off; nothing is sent until the user changes it.
+      var mode = String(get('controller_mode')) === 'chosen' ? 'chosen' : 'off';
+      var mask = validMask(get('controller_buttons'));
+      var select = q('#dsControllerMode');
+      select.value = controllerCapture ? 'chosen' : mode;
+      var captureBtn = q('#dsControllerCapture');
+      captureBtn.hidden = !(controllerCapture || mode === 'chosen');
+      captureBtn.disabled = !ready || !!controllerCapture || !!pending.controller_mode;
+      if (!controllerCapture) captureBtn.textContent = mask ? 'Change button' : 'Press a button';
+      q('#dsControllerSaved').textContent = (mode === 'chosen' && mask)
+        ? 'Snooze button: ' + buttonNames(mask).join(' + ') : '';
+
+      qa('[data-key]').forEach(function (el) {
+        var key = el.getAttribute('data-key');
+        el.disabled = !ready || !!pending[key]
+          || (key === 'alarm_volume' && get('unmute_on_red') !== true)
+          || (key === 'controller_mode' && !!controllerCapture);
+      });
+    }
+
+    // ---- load ----
+    function refresh() {
+      if (loading || capturing || controllerCapture || Object.keys(pending).length) return loading;
+      var settingsCall = call('get_desktop_settings');
+      var monitorsCall = call('list_monitors').then(function (v) { return Array.isArray(v) ? v : null; },
+        function () { return null; });
+      var devicesCall = call('list_audio_devices').then(function (v) { return Array.isArray(v) ? v : null; },
+        function () { return null; });
+      loading = Promise.all([
+        settingsCall.then(function (v) { return { ok: true, value: v }; },
+          function (error) { return { ok: false, error: error }; }),
+        monitorsCall, devicesCall
+      ]).then(function (results) {
+        monitors = results[1];
+        devices = results[2];
+        var got = results[0];
+        if (got.ok && got.value && typeof got.value === 'object' && !got.value.error) {
+          settings = got.value;
+          loadFailed = false;
+          say(q('#dsLoadMsg'), '');
+        } else {
+          loadFailed = true;
+          say(q('#dsLoadMsg'), got.ok
+            ? 'This PC’s settings couldn’t be read. Close and reopen Settings to try again.'
+            : invokeProblem(got.error, 'This PC’s settings aren’t available in this version of the app.'), 'bad');
+        }
+        say('flash_target', monitors ? '' : 'Couldn’t list displays in this version; the choices above still work.');
+        say('alarm_device', devices ? '' : 'Couldn’t list audio devices in this version; the choices above still work.');
+        render();
+      }).then(function () { loading = null; }, function () { loading = null; });
+      return loading;
+    }
+
+    // ---- save: one patch per user action; re-render from what the shell returns ----
+    function save(patch, field) {
+      if (!settings || loadFailed) return Promise.resolve(false);
+      pending[field] = true;
+      say(field, 'Saving…');
+      render();
+      return call('set_desktop_settings', { patch: patch }).then(function (result) {
+        if (result && typeof result === 'object' && result.error) {
+          var errField = result.error.field;
+          var target = (errField && errField !== field && msgEl(errField)) ? errField : field;
+          if (target !== field) say(field, '');
+          say(target, String(result.error.message || 'That setting wasn’t saved.'), 'bad');
+          return false;
+        }
+        if (!result || typeof result !== 'object') {
+          say(field, 'The app didn’t confirm the change; the saved setting is shown.', 'bad');
+          return false;
+        }
+        settings = result;
+        say(field, 'Saved.', 'good');
+        return true;
+      }, function (error) {
+        say(field, invokeProblem(error, 'This setting isn’t available in this version of the app.'), 'bad');
+        return false;
+      }).then(function (ok) {
+        delete pending[field];
+        render();
+        return ok;
+      });
+    }
+    function saveOne(key, value) {
+      var patch = {};
+      patch[key] = value;
+      return save(patch, key);
+    }
+
+    ['#dsFlashTarget', '#dsAlarmSound', '#dsAlarmDevice', '#dsGameMode'].forEach(function (sel) {
+      var select = q(sel);
+      select.addEventListener('change', function () { saveOne(select.getAttribute('data-key'), select.value); });
+    });
+    SWITCH_KEYS.forEach(function (key) {
+      var input = q('input[data-key="' + key + '"]');
+      input.addEventListener('change', function () { saveOne(key, input.checked === true); });
+    });
+    var volumeInput = q('#dsAlarmVolume');
+    volumeInput.addEventListener('input', function () {
+      q('#dsAlarmVolumeOut').textContent = volumeInput.value + '%';
+    });
+    // Saved on release ('change'), never on every input event; always 20-100.
+    volumeInput.addEventListener('change', function () {
+      var n = Math.round(Number(volumeInput.value));
+      if (!isFinite(n)) { render(); return; }
+      n = Math.min(VOLUME_MAX, Math.max(VOLUME_MIN, n));
+      if (n === Number(get('alarm_volume'))) { render(); return; }
+      saveOne('alarm_volume', n);
+    });
+
+    // ---- hotkey capture ----
+    function stopHotkeyCapture() {
+      window.removeEventListener('keydown', onCaptureKey, true);
+      capturing = null;
+      render();
+    }
+    function startHotkeyCapture(key) {
+      if (capturing) stopHotkeyCapture();
+      capturing = key;
+      window.addEventListener('keydown', onCaptureKey, true);
+      say(key, 'Press the key combination now.');
+      render();
+    }
+    function onCaptureKey(event) {
+      var key = capturing;
+      if (!key) return;
+      if (!pane.offsetParent) { say(key, ''); stopHotkeyCapture(); return; }   // modal closed
+      // Plain Tab / Shift+Tab leaves the field so keyboard users are never trapped.
+      if (event.key === 'Tab' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        say(key, 'Cancelled; the hotkey is unchanged.');
+        stopHotkeyCapture();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        say(key, 'Cancelled; the hotkey is unchanged.');
+        stopHotkeyCapture();
+        return;
+      }
+      if (event.repeat) return;
+      var result = hotkeyFromEvent(event);
+      if (result.modifierOnly) return;
+      if (result.error) { say(key, result.error, 'bad'); return; }
+      stopHotkeyCapture();
+      if (result.combo === get(key)) { say(key, 'That is already the ' + hotkeyName(key) + ' hotkey.'); return; }
+      saveOne(key, result.combo).then(function (ok) {
+        if (ok) say(key, 'Saved: ' + hotkeyLabel(get(key)) + '.', 'good');
+      });
+    }
+    function hotkeyName(key) { return q('[data-hotkey="' + key + '"]').getAttribute('data-name'); }
+    HOTKEY_KEYS.forEach(function (key) {
+      var button = q('[data-hotkey="' + key + '"]');
+      button.addEventListener('click', function () {
+        if (capturing === key) { say(key, 'Cancelled; the hotkey is unchanged.'); stopHotkeyCapture(); return; }
+        startHotkeyCapture(key);
+      });
+      button.addEventListener('blur', function () {
+        if (capturing === key) { say(key, ''); stopHotkeyCapture(); }
+      });
+      q('[data-clear="' + key + '"]').addEventListener('click', function () {
+        if (!get(key)) return;
+        saveOne(key, null).then(function (ok) { if (ok) say(key, 'Cleared.', 'good'); });
+      });
+    });
+
+    // ---- controller snooze ----
+    var CAPTURE_SECONDS = 10;
+    function startControllerCapture() {
+      if (controllerCapture || !settings || loadFailed) return;
+      var state = { left: CAPTURE_SECONDS, done: false, timer: null, guard: null };
+      controllerCapture = state;
+      var button = q('#dsControllerCapture');
+      function tickText() {
+        button.textContent = 'Waiting… (' + state.left + ' s)';
+        say('controller_mode', 'Press a button or combination on your controller… (' + state.left + ' s)');
+      }
+      render();
+      tickText();
+      state.timer = setInterval(function () { state.left = Math.max(0, state.left - 1); tickText(); }, 1000);
+      function finish(outcome, value) {
+        if (state.done) return;
+        state.done = true;
+        clearInterval(state.timer);
+        clearTimeout(state.guard);
+        controllerCapture = null;
+        if (outcome === 'missing') {
+          render();
+          say('controller_mode', 'Controller capture isn’t available in this version.', 'bad');
+          return;
+        }
+        var mask = validMask(value && value.buttons);
+        if (!mask) {
+          render();
+          say('controller_mode', 'No controller press seen. Nothing was changed.');
+          return;
+        }
+        save({ controller_mode: 'chosen', controller_buttons: mask }, 'controller_mode').then(function (ok) {
+          if (ok) say('controller_mode', 'Saved: ' + buttonNames(get('controller_buttons')).join(' + ') + '.', 'good');
+        });
+      }
+      // The shell answers within 10 s; the guard only unsticks a shell that never does.
+      state.guard = setTimeout(function () { finish('timeout', null); }, (CAPTURE_SECONDS + 5) * 1000);
+      call('capture_controller_button').then(function (value) { finish('result', value); },
+        function () { finish('missing', null); });
+    }
+    var controllerSelect = q('#dsControllerMode');
+    controllerSelect.addEventListener('change', function () {
+      var value = controllerSelect.value;
+      if (value === 'chosen') {
+        if (validMask(get('controller_buttons'))) { saveOne('controller_mode', 'chosen'); return; }
+        // "chosen" without a button is rejected by the shell: capture one first.
+        startControllerCapture();
+        return;
+      }
+      saveOne('controller_mode', 'off');
+    });
+    q('#dsControllerCapture').addEventListener('click', startControllerCapture);
+
+    // ---- test alerts (server route; same-origin POST like the rest of the page) ----
+    function testAlert(level, button) {
+      var box = button.closest('.ds-card, .set-row');
+      var out = box && box.querySelector('[data-msg="test"]');
+      var name = level === 'red' ? 'Red' : 'Amber';
+      say(out, 'Sending ' + name.toLowerCase() + ' test…');
+      button.disabled = true;
+      fetch('/api/alert/test', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: level, seconds: 20 })
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (data) {
+          if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Failed (' + r.status + ')');
+          return data;
+        });
+      }).then(function () {
+        tested[level] = true;
+        say(out, name + ' test sent. It runs for 20 seconds.', 'good');
+      }, function (error) {
+        say(out, name + ' test failed: ' + (error && error.message ? error.message : 'no answer from the server') + '.', 'bad');
+      }).then(function () {
+        button.disabled = false;
+        render();
+      });
+    }
+    qa('[data-test]').forEach(function (button) {
+      button.addEventListener('click', function () { testAlert(button.getAttribute('data-test'), button); });
+    });
+    q('#dsFirstRunDone').addEventListener('click', function () {
+      saveOne('first_run_test_done', true).then(function (ok) {
+        if (ok) say(q('#dsTestRow [data-msg="test"]'), 'Thanks. The test buttons stay here whenever you need them.', 'good');
+      });
+    });
+
+    render();
+    return { refresh: refresh };
+  }
+
+  window.owletDesktopSettings = {
+    mount: mount,
+    hotkeyFromEvent: hotkeyFromEvent,
+    hotkeyLabel: hotkeyLabel,
+    buttonNames: buttonNames,
+    DEFAULTS: DEFAULTS
+  };
+})();
+</script>"""
+
+
 def render_shell(
     *, view: str, title: str, head: str = "", body: str, scripts: str = "", wide: bool = False
 ) -> str:
@@ -1414,6 +2237,7 @@ def render_shell(
   <link rel="icon" href="/favicon.ico" sizes="any" />
   {THEME_RESOLVER}
   <link rel="stylesheet" href="/theme.css" />
+  {SETTINGS_CSS}
   {head}
 </head>
 <body class="themed">
@@ -1612,6 +2436,45 @@ def render_shell(
               </div>
             </div>
             <div class="set-row">
+              <div class="set-lab"><b><label for="alertSnoozeSetting">Snooze length</label></b><small
+                id="alertSnoozeHint">How long Snooze silences an amber or red alert before it comes
+                back, 5–120 seconds. With several accounts linked, the shortest snooze
+                applies.</small></div>
+              <div class="ds-ctl">
+                <div class="ds-inline">
+                  <input id="alertSnoozeSetting" type="number" min="5" max="120" step="1"
+                    inputmode="numeric" aria-describedby="alertSnoozeHint alertSnoozeMsg" />
+                  <span class="pp-to">sec</span>
+                </div>
+                <small class="ds-msg" id="alertSnoozeMsg" aria-live="polite"></small>
+              </div>
+            </div>
+            <div class="set-row">
+              <div class="set-lab"><b><label for="alertStaleSetting">Stale timeout</label></b><small
+                id="alertStaleHint">Warns that no data is arriving once the newest reading is this
+                old, 30–300 seconds.</small></div>
+              <div class="ds-ctl">
+                <div class="ds-inline">
+                  <input id="alertStaleSetting" type="number" min="30" max="300" step="1"
+                    inputmode="numeric" aria-describedby="alertStaleHint alertStaleMsg" />
+                  <span class="pp-to">sec</span>
+                </div>
+                <small class="ds-msg" id="alertStaleMsg" aria-live="polite"></small>
+              </div>
+            </div>
+            <div class="set-row">
+              <div class="set-lab"><b id="awakeChimeLab">Awake chime</b><small id="awakeChimeHint">A
+                gentle chime when sleep changes from asleep to awake. No flash and nothing to
+                snooze; at most one chime every 5 minutes. Plays on this PC's desktop
+                app.</small></div>
+              <div class="ds-ctl">
+                <label class="ds-switch"><input id="awakeChimeSetting" type="checkbox" role="switch"
+                  aria-labelledby="awakeChimeLab" aria-describedby="awakeChimeHint" /><span
+                  id="awakeChimeState">Off</span></label>
+                <small class="ds-msg" id="awakeChimeMsg" aria-live="polite"></small>
+              </div>
+            </div>
+            <div class="set-row">
               <div class="set-lab"><b>Evening prep report</b><small>A daily nudge before bedtime — awake
                 time, naps, and feeds so far.</small></div>
               <select id="readinessSetting">
@@ -1716,6 +2579,7 @@ def render_shell(
       </div>
     </div>
   </div>
+{DESKTOP_SETTINGS_TEMPLATE}
   <div id="installBackdrop" class="focus-backdrop" hidden>
     <div class="install-sheet card" role="dialog" aria-modal="true" aria-label="Get the app">
       <header>
@@ -1754,6 +2618,7 @@ def render_shell(
     </div>
   </div>
   <div id="toastRack" class="toast-rack" aria-live="polite"></div>
+  {DESKTOP_SETTINGS_JS}
   {SHELL_JS}
   {scripts}
 </body>
