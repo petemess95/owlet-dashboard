@@ -1,6 +1,13 @@
 # v0.2 part 1 handoff
 
-Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Part 2 knows only what is in the repository; this file is the record of what part 1 did, changed and left open. Where it disagrees with [plan-v0.2.md](plan-v0.2.md) or [orchestration-v0.2.md](orchestration-v0.2.md), this file is newer.
+Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Parts 2 and 3 know only what is in the repository; this file is the record of what part 1 did, changed and left open. Where it disagrees with [plan-v0.2.md](plan-v0.2.md) or [orchestration-v0.2.md](orchestration-v0.2.md), this file is newer.
+
+## Changes to the guide after part 1 closed
+
+- **V tier is now Opus 5.5, high** (`worker-complex`, `opus`, `high`). Fable is no longer used for any package. Applies to V8 and V9.
+- **The remaining work is split into two parts** (guide section 5, "Three parts, three sessions"):
+  - **Part 2, controls (waves 5–7):** R5, R6, R7, V7, V8, V10. Includes the "After R6" controller checkpoint. Ends by updating this file and giving the part 3 kickoff prompt.
+  - **Part 3, finish (waves 8–10):** R8, R9, R10, R11, V9, S1, P5, then integration.
 
 ## Branch and commit
 
@@ -18,7 +25,7 @@ Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Part 2 kno
 | P2 | O | ✅ `3c6c3f3` |
 | P3 | S | ✅ `3c0c42f` |
 | P4 | O | ✅ `27ed54d` |
-| P5 | H | part 2 |
+| P5 | H | part 3 |
 | R1 | S | ✅ `8b2ae12` |
 | R2 | S | ✅ `8ce0485` |
 | R3 | O | ✅ `0e5ebbb` |
@@ -26,10 +33,10 @@ Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Part 2 kno
 | R5 | S | part 2 |
 | R6 | O | part 2 |
 | R7 | S | part 2 |
-| R8 | O | part 2 |
-| R9 | O | part 2 |
-| R10 | S | part 2 |
-| R11 | S | part 2 |
+| R8 | O | part 3 |
+| R9 | O | part 3 |
+| R10 | S | part 3 |
+| R11 | S | part 3 |
 | V1 | S | ✅ `93ebf10` |
 | V2 | H | ✅ `f0d2a13` |
 | V3 | V | ✅ `aa18692` |
@@ -38,10 +45,10 @@ Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Part 2 kno
 | V6 | V | ✅ `b9aada1` |
 | V7 | OM | part 2 |
 | V8 | V | part 2 |
-| V9 | V | part 2 |
+| V9 | V | part 3 |
 | V10 | H | part 2 |
 | H1 | H | ✅ `e261033` |
-| S1 | S | part 2 |
+| S1 | S | part 3 |
 
 ## Hands-on checkpoints
 
@@ -134,7 +141,7 @@ All are now written into section 4 of the guide.
   - The restart toast reads "The dashboard server stopped and was restarted."
   - The tray tooltip shows "Owlet — Not armed: <first fault>" only in the plain vitals and "Owlet Dashboard" cases.
 
-## Notes per package for part 2
+## Notes per package for parts 2 and 3
 
 - **P1:**
   - Helpers: `alerts.clamp_setting_seconds`, `alerts.resolve_alert_timing`, `main._snooze_seconds_for`.

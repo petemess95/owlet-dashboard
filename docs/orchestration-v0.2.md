@@ -2,7 +2,7 @@
 
 How to build [plan-v0.2.md](plan-v0.2.md) by delegation. The plan says **what** to build; this file says **who builds each piece, in what order, and how the work is checked**.
 
-Status: **part 1 done** (15 packages, last package commit `8938f30`). Part 2 starts from [orchestration-v0.2-handoff.md](orchestration-v0.2-handoff.md).
+Status: **part 1 done** (15 packages, last package commit `8938f30`). Parts 2 and 3 start from [orchestration-v0.2-handoff.md](orchestration-v0.2-handoff.md).
 
 ## 1. Roles
 
@@ -18,7 +18,7 @@ Status: **part 1 done** (15 packages, last package commit `8938f30`). Part 2 sta
 | **S** | Sonnet 5.5, medium | Slightly more complex tasks that need some judgment, with a small blast radius. | Token audit, a new read-only endpoint, a refactor with no behaviour change, a settings plumbing layer |
 | **O** | Opus 5.5, low | Everything else: alert logic, audio, anything where a mistake could cause a missed or stuck alert, cross-cutting native work. | Alert state machine changes, WASAPI audio, armed state, controller snooze |
 | **OM** | Opus 5.5, medium | The settings page only (your decision): new interface in the new style, but mostly form wiring across many settings and two storage places. | Settings page (V7) |
-| **V** | Fable 5.2, low | Visual design: any package where the worker decides how something looks. | New theme values, Today rebuild, Tonight timeline, widget and overlay restyle |
+| **V** | Opus 5.5, high | Visual design: any package where the worker decides how something looks. | New theme values, Today rebuild, Tonight timeline, widget and overlay restyle |
 
 **Choosing a tier**
 1. If the package decides how something looks, it is **V**, whatever its size.
@@ -27,7 +27,7 @@ Status: **part 1 done** (15 packages, last package commit `8938f30`). Part 2 sta
 4. Otherwise, if it needs judgment but stays inside one area, it is **S**.
 5. When unsure between two tiers, pick the higher one.
 
-**Visual packages still contain logic.** A V package such as the widget restyle includes the JavaScript that drives it. Fable owns the whole package; it is not split into "look" and "code" halves, because the two can't be reviewed apart.
+**Visual packages still contain logic.** A V package such as the widget restyle includes the JavaScript that drives it. The V worker owns the whole package; it is not split into "look" and "code" halves, because the two can't be reviewed apart.
 
 ### How to spawn each tier
 The installed worker definitions (`worker-mechanical`, `worker-rocket`, `worker-standard`, `worker-complex`) don't match these tiers exactly, so pass the model and effort explicitly on each Agent call. The worker type supplies the standing instructions; the overrides set the model.
@@ -38,7 +38,7 @@ The installed worker definitions (`worker-mechanical`, `worker-rocket`, `worker-
 | S | `worker-standard` | `sonnet` | `medium` |
 | O | `worker-standard` | `opus` | `low` |
 | OM | `worker-complex` | `opus` | `medium` |
-| V | `worker-complex` | `fable` | `low` |
+| V | `worker-complex` | `opus` | `high` |
 
 OM and V use `worker-complex`, because its instructions ("own this task end to end, report the decisions you made") suit design and interface work. The others should stop and report a design question, not answer it themselves. OM is used for the settings page only; it is not an escalation step for other packages.
 
@@ -186,37 +186,41 @@ V4, V5 and V6 touch different files and can run together once V3 lands. V7 waits
 
 The shell lane is the long pole: eleven serial packages. If it falls behind, don't parallelise it; the other lanes simply finish earlier.
 
-### Two parts, two sessions
+### Three parts, three sessions
 
-The build is run as two orchestrator sessions, so neither carries the whole history.
+The build is run as three orchestrator sessions, so none carries the whole history. Part 2 was split in two after part 1 closed, at the natural break after R7: by then every user control exists (hotkeys, controller, start at login, settings page, widget), and part 3 is the acknowledge-and-window finish plus integration.
 
 | Part | Waves | Packages | Ends with |
 |---|---|---|---|
-| **1. Foundations** | 1–4 | P1–P4, R1–R4, V1–V6, H1 (15) | Alerts are trustworthy (audio, armed state, keep-awake, watchdog), the server side is complete, and every page has the new look. |
-| **2. Controls and finish** | 5–10 | R5–R11, V7–V10, S1, P5 (13) | Hotkeys, controller snooze, settings page, widget, overlay, game mode, then integration. |
+| **1. Foundations** ✅ | 1–4 | P1–P4, R1–R4, V1–V6, H1 (15) | Alerts are trustworthy (audio, armed state, keep-awake, watchdog), the server side is complete, and every page has the new look. |
+| **2. Controls** | 5–7 | R5, R6, R7, V7, V8, V10 (6) | Hotkeys, controller snooze (checkpoint "After R6"), start at login, the settings page, the restyled widget, new icons. |
+| **3. Finish and integration** | 8–10 | R8, R9, R10, R11, V9, S1, P5 (7) | Shell acknowledge, overlay restyle, widget window modes, live tray icon, game mode, docs, version bump, then integration (section 9). |
 
-**Closing part 1.** After the last part 1 package is verified, the orchestrator:
+**Closing a part (1 or 2).** After the last package of the part is verified, the orchestrator:
 1. Runs every check in section 7 on the branch, and confirms the desktop app builds and starts.
-2. Writes `docs/orchestration-v0.2-handoff.md` containing:
+2. Writes or updates `docs/orchestration-v0.2-handoff.md` (part 2 adds a "Part 2" section and refreshes the status table) containing:
    - the status table for all 28 packages
    - the branch name and the last commit
    - every change made to the contracts in section 4, and any place the code differs from the plan
-   - decisions you made during part 1 that the plan and guide don't record
+   - decisions you made during the part that the plan and guide don't record
    - known issues, failed or skipped checks, and anything not verified by hand
    - which hands-on checkpoints were done and their results
 3. Updates section 4 of this guide if any contract changed, and commits both files.
-4. Gives you the part 2 kickoff prompt below, with the branch and commit filled in, and stops.
+4. Gives you the next part's kickoff prompt below, with the branch and commit filled in, and stops.
 
-Part 2 starts in a fresh session and knows only what is in the repository, so anything not written to the handoff file is lost.
+Each part starts in a fresh session and knows only what is in the repository, so anything not written to the handoff file is lost.
 
-**Part 2 kickoff prompt** (the part 1 orchestrator fills in the two placeholders):
+**Kickoff prompt for parts 2 and 3** (the closing orchestrator fills in the placeholders; `<scope>` is the matching line below):
+
+- Part 2: `part 2 (waves 5-7: R5, R6, R7, V7, V8, V10). Stop after closing part 2 as described in "Three parts, three sessions".`
+- Part 3: `part 3 (waves 8-10: R8-R11, V9, S1, P5) and integration (section 9).`
 
 ```text
-You are the orchestrator for part 2 of Owlet Dashboard v0.2.
-Part 1 was completed in an earlier session. Branch: <branch>, last commit: <sha>.
+You are the orchestrator for part <n> of Owlet Dashboard v0.2.
+Earlier parts were completed in earlier sessions. Branch: <branch>, last commit: <sha>.
 
 Read these three files in full before doing anything else:
-- docs/orchestration-v0.2-handoff.md (what part 1 did, changed and left open)
+- docs/orchestration-v0.2-handoff.md (what earlier parts did, changed and left open)
 - docs/plan-v0.2.md (what to build)
 - docs/orchestration-v0.2.md (who builds each piece, the order, contracts, checks)
 
@@ -226,8 +230,8 @@ newer record: tell me about the difference before acting on it.
 First, verify the starting point yourself: confirm the branch and commit, and
 run every check in section 7 of the guide. If anything fails, stop and tell me.
 
-Then run part 2 (waves 5-10: R5-R11, V7-V10, S1, P5) and integration
-(section 9), following the guide exactly:
+Then run <scope>
+Follow the guide exactly:
 1. You do not write product code. One worker per package, briefed in full from
    the section 6 template. Workers see nothing from this conversation.
 2. Pass subagent_type, model and effort explicitly from the "How to spawn each
