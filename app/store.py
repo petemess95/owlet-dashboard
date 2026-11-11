@@ -886,6 +886,55 @@ class ReadingStore:
             rows = await cursor.fetchall()
         return [(str(r[0]), float(r[1])) for r in reversed(rows)]
 
+    async def get_latest_device_reading(
+        self, *, account_id: int, device_serial: str
+    ) -> OwletReading | None:
+        """The newest stored reading for one device (read-only)."""
+        await self.init()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT device_serial, recorded_at, heart_rate, oxygen_saturation, battery,
+                       movement, sleep_state, skin_temperature, raw_json,
+                       battery_minutes, movement_bucket, oxygen_10_av, signal_strength, charging
+                FROM readings
+                WHERE account_id = ? AND device_serial = ?
+                ORDER BY recorded_at DESC
+                LIMIT 1
+                """,
+                (int(account_id), device_serial),
+            )
+            row = await cursor.fetchone()
+        return self._row_to_reading(row) if row else None
+
+    async def get_sleep_state_history(
+        self,
+        *,
+        account_id: int,
+        device_serial: str,
+        since: datetime,
+        limit: int = 20000,
+    ) -> list[tuple[str, str | None, bool, float | None, float | None]]:
+        """(recorded_at, sleep_state, charging, heart_rate, spo2) for one device
+        since `since`, NEWEST first. Read-only; never touches raw_json."""
+        await self.init()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT recorded_at, sleep_state, charging, heart_rate, oxygen_saturation
+                FROM readings
+                WHERE account_id = ? AND device_serial = ? AND recorded_at >= ?
+                ORDER BY recorded_at DESC
+                LIMIT ?
+                """,
+                (int(account_id), device_serial, since.isoformat(), int(limit)),
+            )
+            rows = await cursor.fetchall()
+        return [
+            (str(r[0]), None if r[1] is None else str(r[1]), bool(r[2]), r[3], r[4])
+            for r in rows
+        ]
+
     async def get_readings_window(
         self,
         *,

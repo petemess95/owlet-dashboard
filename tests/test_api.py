@@ -1697,7 +1697,7 @@ async def test_widget_series_window_order_format_and_skips(tmp_path):
     times = [p["t"] for p in body["points"]]
     assert times == sorted(times)
     assert all(t.endswith("Z") and len(t) == 20 for t in times)
-    assert set(body) == {"device_serial", "warn_threshold", "critical_threshold", "points"}
+    assert set(body) == {"device_serial", "warn_threshold", "critical_threshold", "points", "sleep"}
 
 
 @pytest.mark.asyncio
@@ -1810,6 +1810,7 @@ async def test_widget_series_no_readings_returns_defaults(tmp_path):
         "warn_threshold": DEFAULT_O2_WARN,
         "critical_threshold": DEFAULT_O2_CRITICAL,
         "points": [],
+        "sleep": None,
     }
 
 
@@ -1827,3 +1828,211 @@ async def test_widget_series_is_user_scoped(tmp_path):
         sb = b.get("/api/widget-series").json()
     assert (sa["device_serial"], [p["spo2"] for p in sa["points"]]) == ("ALICE1", [91])
     assert (sb["device_serial"], [p["spo2"] for p in sb["points"]]) == ("BOB1", [99])
+
+
+# ---- /api/widget-series: sleep timer ------------------------------------------------
+
+
+async def _seed_raw(store, timestamp, account_id, device_serial="AC123", **raw):
+    values = {
+        "heart_rate": 120, "oxygen_saturation": 97, "sleep_state": 8,
+        "last_updated": timestamp, "battery": 100,
+    }
+    values.update(raw)
+    await store.insert_reading(normalize_reading(values, device_serial), account_id=account_id)
+
+
+async def _sleep_setup(tmp_path):
+    store, _, user, session, app = await _series_setup(tmp_path)
+    account = await store.create_account(email="sock@x.y", user_id=user["id"])
+    return store, session, app, account["id"]
+
+
+def _sleep_of(app, session):
+    with client_for(app, session) as client:
+        return client.get("/api/widget-series?minutes=10").json()
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_asleep_run_starts_at_earliest_reading_of_the_run(tmp_path):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(minutes=50), aid, sleep_state=8)   # an earlier, separate run
+    await _seed_raw(store, _ago(minutes=45), aid, sleep_state=1)   # awake ends it
+    start = _ago(minutes=40)
+    await _seed_raw(store, start, aid, sleep_state=8)
+    for m, st in ((30, 15), (20, 15), (10, 8), (5, 8)):            # light and deep both count
+        await _seed_raw(store, _ago(minutes=m), aid, sleep_state=st)
+    await _seed_raw(store, _ago(seconds=10), aid, sleep_state="8")
+    body = _sleep_of(app, session)
+    assert body["sleep"] == {"state": "asleep", "since": start}
+    assert body["device_serial"] == "AC123"
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_awake(tmp_path):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(minutes=30), aid, sleep_state=15)
+    start = _ago(minutes=12)
+    await _seed_raw(store, start, aid, sleep_state=1)
+    await _seed_raw(store, _ago(minutes=6), aid, sleep_state=1)
+    await _seed_raw(store, _ago(seconds=5), aid, sleep_state=1)
+    assert _sleep_of(app, session)["sleep"] == {"state": "awake", "since": start}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", [0, None, 3])
+async def test_widget_sleep_unknown_state_is_null(tmp_path, state):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(minutes=5), aid, sleep_state=8)
+    await _seed_raw(store, _ago(seconds=5), aid, sleep_state=state)
+    body = _sleep_of(app, session)
+    assert body["sleep"] is None
+    assert body["device_serial"] == "AC123"
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_stale_latest_reading_is_null_using_account_timeout(tmp_path):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(minutes=20), aid, sleep_state=8)
+    await _seed_raw(store, _ago(seconds=90), aid, sleep_state=8)
+    body = _sleep_of(app, session)
+    assert body["sleep"] is None                        # default 60 s
+    assert [p["spo2"] for p in body["points"]] == [97]  # the rest is unchanged
+    # A longer configured stale timeout (alert_stale_seconds) keeps it.
+    with client_for(app, session) as client:
+        r = client.patch(f"/api/accounts/{aid}", json={"dashboard_preferences": {"alert_stale_seconds": 120}})
+        assert r.status_code == 200, r.text
+    assert _sleep_of(app, session)["sleep"]["state"] == "asleep"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"oxygen_saturation": 0, "heart_rate": 0},   # sock off: zero vitals
+        {"sock_off": 1},                             # sock-off flag with old vitals
+        {"charging": 1},
+    ],
+)
+async def test_widget_sleep_sock_off_or_charging_is_null(tmp_path, raw):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(minutes=10), aid, sleep_state=8)
+    await _seed_raw(store, _ago(seconds=5), aid, sleep_state=8, **raw)
+    assert _sleep_of(app, session)["sleep"] is None
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_run_ends_at_a_charging_row_or_a_long_gap(tmp_path):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(minutes=60), aid, sleep_state=8)
+    await _seed_raw(store, _ago(minutes=55), aid, sleep_state=8, charging=1)
+    after_charge = _ago(minutes=50)
+    await _seed_raw(store, after_charge, aid, sleep_state=8)
+    await _seed_raw(store, _ago(minutes=42), aid, sleep_state=8)
+    newest = _ago(seconds=5)
+    await _seed_raw(store, newest, aid, sleep_state=8)   # 42 min of silence before it
+    assert _sleep_of(app, session)["sleep"] == {"state": "asleep", "since": newest}
+    for m in (33, 24, 15, 6):                            # fill the gap: one run again
+        await _seed_raw(store, _ago(minutes=m), aid, sleep_state=8)
+    assert _sleep_of(app, session)["sleep"] == {"state": "asleep", "since": after_charge}
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_is_bounded_to_16_hours(tmp_path):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    for m in range(17 * 60, 0, -8):          # asleep every 8 min for 17 h
+        await _seed_raw(store, _ago(minutes=m), aid, sleep_state=15)
+    await _seed_raw(store, _ago(seconds=5), aid, sleep_state=15)
+    before = datetime.now(timezone.utc) - timedelta(hours=16)
+    sleep = _sleep_of(app, session)["sleep"]
+    after = datetime.now(timezone.utc) - timedelta(hours=16)
+    since = datetime.fromisoformat(sleep["since"].replace("Z", "+00:00"))
+    assert sleep["state"] == "asleep"
+    assert before - timedelta(seconds=1) <= since <= after
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_run_just_inside_16_hours_is_not_clipped(tmp_path):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(hours=16, minutes=5), aid, sleep_state=1)
+    start = _ago(hours=15, minutes=58)
+    await _seed_raw(store, start, aid, sleep_state=8)
+    for m in range(15 * 60 + 50, 0, -8):
+        await _seed_raw(store, _ago(minutes=m), aid, sleep_state=8)
+    await _seed_raw(store, _ago(seconds=5), aid, sleep_state=8)
+    assert _sleep_of(app, session)["sleep"] == {"state": "asleep", "since": start}
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_ignores_the_test_alert_device(tmp_path):
+    from app.alerts import ALERTS
+
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    start = _ago(minutes=30)
+    await _seed_raw(store, start, aid, sleep_state=8)
+    for m in (22, 14, 6):
+        await _seed_raw(store, _ago(minutes=m), aid, sleep_state=8)
+    await _seed_raw(store, _ago(seconds=5), aid, sleep_state=8)
+    ALERTS.reset()
+    try:
+        with client_for(app, session) as client:
+            assert client.post("/api/alert/test", json={"level": "red", "seconds": 60}).status_code == 200
+            body = client.get("/api/widget-series").json()
+            state = client.get("/api/alert-state").json()
+        assert body["device_serial"] == "AC123"
+        assert body["sleep"] == {"state": "asleep", "since": start}
+        assert state["active_level"] == "red"          # the test alert is untouched
+    finally:
+        ALERTS.reset()
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_is_read_only_for_alert_state(tmp_path):
+    import time
+
+    from app.alerts import ALERTS
+    from app.models import OwletReading
+
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(minutes=5), aid, sleep_state=8, oxygen_saturation=80)
+    await _seed_raw(store, _ago(seconds=5), aid, sleep_state=8, oxygen_saturation=80)
+    ALERTS.reset()
+    try:
+        now = datetime.now(timezone.utc)
+        for i in range(3):
+            ALERTS.observe(
+                aid, "Baby",
+                OwletReading(device_serial="AC123", recorded_at=now + timedelta(seconds=i),
+                             oxygen_saturation=80, heart_rate=130, sleep_state="8"),
+                90, 86, time.time(),
+            )
+        with client_for(app, session) as client:
+            before = client.get("/api/alert-state").json()
+            body = client.get("/api/widget-series").json()
+            after = client.get("/api/alert-state").json()
+        assert body["sleep"]["state"] == "asleep"
+        for key in ("level", "active_level", "snoozed", "acknowledged", "awake_event_id"):
+            assert before[key] == after[key], key
+        assert after["active_level"] == "red"
+    finally:
+        ALERTS.reset()
+
+
+@pytest.mark.asyncio
+async def test_widget_sleep_internal_error_is_null_with_the_rest_intact(tmp_path):
+    store, session, app, aid = await _sleep_setup(tmp_path)
+    await _seed_raw(store, _ago(minutes=3), aid, sleep_state=8, oxygen_saturation=95)
+    await _seed_raw(store, _ago(seconds=5), aid, sleep_state=8, oxygen_saturation=96)
+    healthy = _sleep_of(app, session)
+    assert healthy["sleep"]["state"] == "asleep"
+
+    async def broken(**_kwargs):
+        raise RuntimeError("disk on fire")
+
+    store.get_sleep_state_history = broken
+    body = _sleep_of(app, session)
+    assert body["sleep"] is None
+    assert {k: v for k, v in body.items() if k != "sleep"} == {
+        k: v for k, v in healthy.items() if k != "sleep"
+    }
+    assert [p["spo2"] for p in body["points"]] == [95, 96]

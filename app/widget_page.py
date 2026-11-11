@@ -10,7 +10,9 @@ app/static/theme.css (a test checks they stay equal).
 
 Three layouts, chosen from the viewport size (the shell sets the window size)
 or from ``?size=micro|compact|expanded``: micro pill 110x32, compact 300x120,
-expanded 300x200 (adds a 10-minute oxygen trace with the threshold lines).
+expanded 300x200 (adds a 10-minute oxygen trace with the threshold lines and,
+in the plain "Updated" state only, a sleep timer; any alert, snooze,
+acknowledge or problem line hides it).
 It still works when opened in a normal browser (the Tauri-only parts hide)."""
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ WIDGET_HTML = r"""<!doctype html>
     --bad: #ff7b7b;
     --series-o2: #9be3c9;
     --series-hr: #f0a6c0;
+    --sleep-light: #7c80e6;
     --awake: #d9b0a5;
     --chart-phase-awake: rgba(217, 176, 165, .22);
     --pill-hover: rgba(200, 203, 255, .07);
@@ -90,6 +93,18 @@ WIDGET_HTML = r"""<!doctype html>
   .status.red { color:var(--bad); font-weight:600; }
   .awake { flex:none; color:var(--awake); background:var(--chart-phase-awake); font-weight:600;
     font-size:12px; padding:1px 9px; border-radius:var(--radius-control); }
+
+  /* Expanded: sleep timer at the end of the status line ("Asleep 2h 14m").
+     Text plus a shape (crescent asleep, open ring awake), so colour is not the
+     only cue; sleep and awake hues only, never the alert colours. */
+  .sleep { flex:none; margin-left:auto; display:flex; align-items:center; gap:5px; font-size:12px;
+    font-weight:600; padding:1px 9px 1px 7px; border-radius:var(--radius-control);
+    background:var(--surface-inset); color:var(--sleep-light); white-space:nowrap;
+    font-variant-numeric:tabular-nums; }
+  .sleep b { color:var(--ink); font-weight:700; }
+  .sleep svg { width:10px; height:10px; flex:none; }
+  .sleep.is-awake { color:var(--awake); }
+  .sleep[hidden], .size-micro .sleep, .size-compact .sleep { display:none !important; }
 
   /* Armed dot: mint when armed; amber with "!" on a fault; grey ring when not
      monitoring; dim while checking. Shape differs, so colour is not the only cue. */
@@ -191,6 +206,7 @@ WIDGET_HTML = r"""<!doctype html>
     <span class="dot" id="dot" role="img" hidden></span>
     <span class="status grey" id="status">Connecting…</span>
     <span class="awake" id="awake" hidden>Awake</span>
+    <span class="sleep" id="sleep" hidden></span>
   </div>
   <div id="extras"></div>
   <div id="sparkBox">
@@ -221,10 +237,12 @@ WIDGET_HTML = r"""<!doctype html>
   var AWAKE_NOTE_MS = 60000;
   var SERIES_MIN_MS = 30000;
   var SERIES_SPAN_MS = 600000;
+  var SLEEP_FRESH_MS = 180000;   // older sleep data (failed refetches) is not shown
+  var SLEEP_CAP_MIN = 960;       // the server looks back 16 h at most
   var armed = null, armedAt = 0;
   var lastSample = null, beat = 0, sampleSinceSeries = false;
   var awakeSeen = false, awakeId = null, awakeUntil = 0;
-  var series = null, seriesAt = 0, seriesBusy = false;
+  var series = null, seriesAt = 0, seriesBusy = false, seriesOkAt = 0;
   var size = "compact";
 
   if (invoke) {
@@ -361,7 +379,7 @@ WIDGET_HTML = r"""<!doctype html>
     seriesBusy = true; seriesAt = now; sampleSinceSeries = false;
     fetch("/api/widget-series?minutes=10", { credentials: "same-origin", cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then(function (j) { series = j; seriesBusy = false; render(); })
+      .then(function (j) { series = j; seriesOkAt = Date.now(); seriesBusy = false; render(); })
       .catch(function () { seriesBusy = false; });
   }
 
@@ -420,6 +438,45 @@ WIDGET_HTML = r"""<!doctype html>
         '); bottom:calc(4px + (100% - 8px) * ' + f(band[1]) + ')"><span>No oxygen readings in the last 10 min</span></div>';
     }
     el.innerHTML = html;
+  }
+
+  // ---- expanded: sleep timer ----------------------------------------------------
+  function sleepFor(ms) {
+    var m = Math.floor(Math.max(0, ms) / 60000);
+    if (m >= SLEEP_CAP_MIN) return "16h+";
+    if (m < 1) return "<1m";
+    var h = Math.floor(m / 60), r = m % 60;
+    return h ? h + "h " + (r < 10 ? "0" : "") + r + "m" : r + "m";
+  }
+
+  // {state, label, dur} or null. `plain` is true only when the status line is
+  // the ordinary "Updated" text with nothing alerting, snoozed, acknowledged
+  // or wrong, so the timer can never cover, displace or delay any of those.
+  // It ticks from `since` on every render; data comes with the series fetch.
+  function sleepView(d, plain) {
+    if (size !== "expanded" || !plain || !d || !series || !series.sleep) return null;
+    var sl = series.sleep;
+    if (sl.state !== "asleep" && sl.state !== "awake") return null;
+    if (series.device_serial !== d.device_serial) return null;
+    if (!d.sock_reporting || d.stale || d.signal_lost || d.charging) return null;
+    if (Date.now() - seriesOkAt > SLEEP_FRESH_MS) return null;
+    var since = Date.parse(sl.since);
+    if (isNaN(since)) return null;
+    return { state: sl.state, label: sl.state === "asleep" ? "Asleep" : "Awake", dur: sleepFor(Date.now() - since) };
+  }
+
+  var SLEEP_ICONS = {
+    asleep: '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M6.6 1.2a4 4 0 1 0 2.2 6.3A3.3 3.3 0 0 1 6.6 1.2z" fill="currentColor"/></svg>',
+    awake: '<svg viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="3.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>'
+  };
+
+  function renderSleep(view) {
+    var el = $("sleep");
+    el.hidden = !view;
+    if (!view) return;
+    el.className = view.state === "awake" ? "sleep is-awake" : "sleep";
+    el.innerHTML = SLEEP_ICONS[view.state] + esc(view.label) + " <b>" + esc(view.dur) + "</b>";
+    el.title = view.label + " " + view.dur;
   }
 
   // ---- micro pill ----------------------------------------------------------------
@@ -486,13 +543,14 @@ WIDGET_HTML = r"""<!doctype html>
       $("msnooze").hidden = true;
       $("awake").hidden = true;
       $("awakeMark").hidden = true;
+      renderSleep(null);
       $("micro").innerHTML = microFailed(wasAlerting);
       $("app").className = appCls;
       setStatus("Dashboard server not responding", true);
       return;
     }
     var s = last;
-    if (!s) { $("micro").innerHTML = word("Connecting"); $("app").className = appCls; return; }
+    if (!s) { renderSleep(null); $("micro").innerHTML = word("Connecting"); $("app").className = appCls; return; }
     var elapsed = Math.floor((Date.now() - lastAt) / 1000);
     var devs = s.devices || [];
     var d = devs.find(function (x) { return s.level !== "none" && x.level === s.level && x.signal_lost; }) ||
@@ -538,6 +596,7 @@ WIDGET_HTML = r"""<!doctype html>
     $("hr").className = hr == null ? "hr none" : "hr";
 
     var aview2 = aview && aview.status ? aview : null;
+    var plainStatus = false;
     // An active (unacknowledged) alert always wins; the server never sends
     // both, but the widget must not let "Acknowledged" mask one if it did.
     if (s.acknowledged && !alerting) setStatus("Acknowledged — " + (d && d.signal_lost ? "signal lost" : spo2 == null ? "no reading" : spo2 + "%") +
@@ -553,12 +612,16 @@ WIDGET_HTML = r"""<!doctype html>
     else if (!d) setStatus("Waiting for data", true);
     else if (d.stale) setStatus("No data for " + ago((d.age_seconds || 0) + elapsed), true);
     else if (!d.sock_reporting) setStatus(d.charging ? "Charging" : "Sock off", true);
-    else setStatus("Updated " + ago((d.age_seconds || 0) + elapsed) + " ago", false);
+    else { setStatus("Updated " + ago((d.age_seconds || 0) + elapsed) + " ago", false); plainStatus = true; }
 
     // Awake note: soft, never while any amber/red level is present.
     var awake = Date.now() < awakeUntil && !level && !alerting;
     $("awake").hidden = !awake;
     $("awakeMark").hidden = !awake;
+    // Sleep timer: never beside an alert, snooze, acknowledge, signal loss or
+    // the awake note; the status line it sits on must be the plain one.
+    renderSleep(sleepView(d, plainStatus && !alerting && !level && !s.acknowledged &&
+      !s.snoozed && !awake));
 
     $("app").className = appCls;   // before measuring the micro text
     setMicro(micro(s, d, { spo2: spo2, hr: hr, t: t }));

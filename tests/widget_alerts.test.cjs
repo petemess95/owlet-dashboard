@@ -652,3 +652,180 @@ test('alert flash is unchanged by the new states: alert-<level> exactly when act
     if (cls.startsWith('alert-')) assert.doesNotMatch(p.element('status').textContent, /Acknowledged/);
   }
 });
+
+// ---- expanded: sleep timer (V8b) ------------------------------------------------
+const NOW = 1800000000000;
+const ago = (ms) => new Date(NOW - ms).toISOString();
+const sleepSeries = (sleep) => ({ ...SERIES, sleep });
+const ASLEEP = sleepSeries({ state: 'asleep', since: ago((2 * 3600 + 14 * 60) * 1000 + 5000) });
+const sock1 = (changes = {}) => device({ device_serial: 'SOCK1', ...changes });
+const timer = (p) => (p.element('sleep').hidden ? null : text(p.element('sleep').innerHTML));
+
+test('expanded timer shows "Asleep 2h 14m" in the plain state and ticks each minute', async () => {
+  const p = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], series: ASLEEP });
+  await flush();
+  await flush();
+  assert.equal(p.element('status').textContent, 'Updated 0s ago');
+  assert.equal(timer(p), 'Asleep 2h 14m');
+  assert.equal(p.element('sleep').className, 'sleep');
+  assert.match(p.element('sleep').innerHTML, /<svg/);            // a shape, not colour alone
+  p.advance(55000);
+  p.intervals.get(1000)();
+  assert.equal(timer(p), 'Asleep 2h 15m');                       // ticks locally, no new fetch
+  assert.equal(p.calls.filter((c) => c.startsWith('GET /api/widget-series')).length, 1);
+});
+
+test('expanded timer: awake uses the awake style; short and long durations', async () => {
+  for (const [sleep, expected, cls] of [
+    [{ state: 'awake', since: ago(12 * 60000 + 1000) }, 'Awake 12m', 'sleep is-awake'],
+    [{ state: 'asleep', since: ago(20000) }, 'Asleep <1m', 'sleep'],
+    [{ state: 'asleep', since: ago(3 * 3600000 + 5 * 60000) }, 'Asleep 3h 05m', 'sleep'],
+    [{ state: 'asleep', since: ago(16 * 3600000) }, 'Asleep 16h+', 'sleep'],
+  ]) {
+    const p = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], series: sleepSeries(sleep) });
+    await flush();
+    await flush();
+    assert.equal(timer(p).replace(/&lt;/g, '<'), expected);
+    assert.equal(p.element('sleep').className, cls);
+  }
+});
+
+test('expanded timer hides when sleep is null, malformed, for another device, or old', async () => {
+  for (const series of [
+    sleepSeries(null), SERIES, sleepSeries({ state: 'unknown', since: ago(60000) }),
+    sleepSeries({ state: 'asleep', since: 'not a date' }),
+    { ...ASLEEP, device_serial: 'SOCK2' },
+  ]) {
+    const p = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], series });
+    await flush();
+    await flush();
+    assert.equal(timer(p), null, JSON.stringify(series));
+  }
+  // No successful refetch for over 3 minutes: the sleep data is not trusted.
+  const p = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], series: ASLEEP });
+  await flush();
+  await flush();
+  assert.notEqual(timer(p), null);
+  p.advance(181000);
+  await p.poll();
+  assert.equal(timer(p), null);
+});
+
+test('timer shows only in the expanded size', async () => {
+  const p = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], series: ASLEEP });
+  await flush();
+  await flush();
+  assert.equal(timer(p), 'Asleep 2h 14m');
+  p.resize(300, 120);
+  assert.equal(p.element('app').className, 'size-compact');
+  assert.equal(timer(p), null);
+  p.resize(110, 32);
+  assert.equal(p.element('app').className, 'size-micro');
+  assert.equal(timer(p), null);
+  p.resize(300, 200);
+  assert.equal(timer(p), 'Asleep 2h 14m');
+  for (const search of ['?size=compact', '?size=micro']) {
+    const q = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], search, series: ASLEEP });
+    await flush();
+    await flush();
+    assert.equal(timer(q), null, search);
+  }
+});
+
+// Every non-plain state: the timer hides, and everything else on the widget is
+// exactly what it is with no sleep data at all.
+const view = (p) => ({
+  status: p.element('status').textContent, statusCls: p.element('status').className,
+  frame: p.element('frame').className, app: p.element('app').className,
+  snooze: [p.element('snooze').hidden, p.element('snooze').textContent, p.element('snooze').className],
+  msnooze: [p.element('msnooze').hidden, p.element('msnooze').className],
+  spo2: [p.element('spo2').className, p.element('spo2').innerHTML],
+  hr: p.element('hr').innerHTML, awake: p.element('awake').hidden,
+  extras: p.element('extras').innerHTML, spark: p.element('spark').innerHTML,
+  micro: p.element('micro').innerHTML,
+});
+const HIDDEN_STATES = [
+  ['stale', normal({ stale: true, age_seconds: 90 })],
+  ['sock off', normal({ sock_reporting: false })],
+  ['charging', normal({ sock_reporting: false, charging: true })],
+  ['signal lost', state({ level: 'amber', active_level: 'amber', signal_lost: true,
+    devices: [sock1({ level: 'amber', signal_lost: true, stale: true })] })],
+  ['snoozed', state({ active_level: 'none', snoozed: true, snooze_seconds_left: 10, devices: [sock1()] })],
+  ['acknowledged', state({ active_level: 'none', acknowledged: true, ack_seconds_left: 300, devices: [sock1()] })],
+  ['acknowledged after recovery', state({ level: 'none', active_level: 'none', acknowledged: true,
+    ack_seconds_left: 120, devices: [sock1({ level: 'none', spo2: 97 })] })],
+  ['amber alert', state({ level: 'amber', active_level: 'amber', devices: [sock1({ level: 'amber', spo2: 88 })] })],
+  ['red alert', state({ devices: [sock1()] })],
+  ['test alert', state({ devices: [device({ device_serial: 'TEST' }), sock1({ level: 'none', spo2: 97 })] })],
+  ['no account linked', state({ level: 'none', active_level: 'none', collecting: false, devices: [] })],
+];
+
+for (const [name, value] of HIDDEN_STATES) {
+  test(`expanded timer hides during ${name} and leaves the rest unchanged`, async () => {
+    const withSleep = page('app/widget_page.py', { initial: value, viewport: [300, 200], series: ASLEEP });
+    const without = page('app/widget_page.py', { initial: value, viewport: [300, 200], series: sleepSeries(null) });
+    await flush();
+    await flush();
+    assert.equal(timer(withSleep), null);
+    assert.deepEqual(view(withSleep), view(without));
+  });
+}
+
+test('an alert arriving while the timer shows hides it on the same poll; alert text and Snooze unchanged', async () => {
+  const p = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], series: ASLEEP });
+  const ref = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], series: sleepSeries(null) });
+  await flush();
+  await flush();
+  assert.equal(timer(p), 'Asleep 2h 14m');
+  for (const value of [
+    state({ devices: [sock1()] }),
+    state({ level: 'amber', active_level: 'amber', devices: [sock1({ level: 'amber', spo2: 88 })] }),
+  ]) {
+    for (const q of [p, ref]) { q.respond(value); await q.poll(); }
+    assert.equal(timer(p), null);
+    assert.equal(p.element('snooze').hidden, false);
+    assert.match(p.element('status').textContent, /^(Low oxygen|Oxygen warning) · 0s ago$/);
+    assert.deepEqual(view(p), view(ref));
+    // Snooze still works and the snoozed line has no timer either.
+    p.element('snooze').onclick();
+    ref.element('snooze').onclick();
+    await flush();
+    assert.equal(p.element('status').textContent, 'Snoozed 15s');
+    assert.equal(timer(p), null);
+    assert.deepEqual(view(p), view(ref));
+  }
+  // Back to normal: the timer returns.
+  p.respond(normal());
+  await p.poll();
+  assert.equal(timer(p), 'Asleep 2h 14m');
+});
+
+test('expanded timer hides when the server is down, and with the awake note', async () => {
+  const p = page('app/widget_page.py', { initial: { ...normal(), awake_event_id: 1 }, viewport: [300, 200], series: ASLEEP });
+  await flush();
+  await flush();
+  assert.equal(timer(p), 'Asleep 2h 14m');
+  p.respond({ ...normal(), awake_event_id: 2 });
+  await p.poll();
+  assert.equal(p.element('awake').hidden, false);
+  assert.equal(timer(p), null);
+  p.disconnect();
+  await p.poll();
+  assert.equal(p.element('status').textContent, 'Dashboard server not responding');
+  assert.equal(timer(p), null);
+});
+
+test('expanded timer never sits beside a desktop alert-status problem', async () => {
+  const p = page('app/widget_page.py', {
+    desktop: true, initial: normal(), viewport: [300, 200], series: ASLEEP,
+    armed: { armed: false, problems: [{ code: 'no_audio', text: 'Alarm sound fell back to basic playback' }] },
+  });
+  await flush();
+  await flush();
+  assert.equal(p.element('status').textContent, 'Alarm sound fell back to basic playback');
+  assert.equal(timer(p), null);
+  p.setArmed({ armed: true, problems: [] });
+  await p.poll();
+  assert.equal(p.element('status').textContent, 'Updated 0s ago');
+  assert.equal(timer(p), 'Asleep 2h 14m');
+});

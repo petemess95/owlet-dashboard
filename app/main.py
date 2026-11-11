@@ -20,6 +20,8 @@ from pydantic import BaseModel
 from app import auth_pages, widget_page
 from app.alerts import (
     ALERTS,
+    ASLEEP_STATES,
+    AWAKE_STATE,
     SNOOZE_MAX_SECONDS,
     SNOOZE_MIN_SECONDS,
     SNOOZE_SECONDS,
@@ -1096,6 +1098,78 @@ def create_app(
             snooze_seconds=await _snooze_seconds_for(user, ids),
         )
 
+    # Sleep timer on the expanded widget: how far back a run may reach, and the
+    # longest gap between readings that still counts as one unbroken run (a
+    # longer silence, e.g. the sock off with no rows stored, ends it).
+    WIDGET_SLEEP_LOOKBACK = timedelta(hours=16)
+    WIDGET_SLEEP_MAX_GAP = timedelta(minutes=10)
+
+    def _sleep_kind(value: object) -> str | None:
+        """Map a stored sleep_state to "asleep" (ASLEEP_STATES, the awake
+        chime's set), "awake" (AWAKE_STATE) or None (0, null, anything else)."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        try:
+            number = float(text)
+            if math.isfinite(number) and number == int(number):
+                text = str(int(number))  # "8.0" -> "8"
+        except ValueError:
+            pass
+        if text in ASLEEP_STATES:
+            return "asleep"
+        if text == AWAKE_STATE:
+            return "awake"
+        return None
+
+    def _as_utc(value: datetime | str) -> datetime:
+        moment = datetime.fromisoformat(value) if isinstance(value, str) else value
+        return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+    async def _widget_sleep(
+        account_id: int, serial: str, stale_seconds: int, now: datetime
+    ) -> dict | None:
+        """{"state": "asleep"|"awake", "since": iso} for one device, or None.
+
+        Read-only: only SELECTs readings; never calls the alert engine.
+        None when there is no reading, the newest one is older than the stale
+        timeout, the sock is off or charging, or the state is unknown. "since"
+        is the earliest reading of the current run of that state, where a
+        different state, a sock-off/charging row or a gap longer than
+        WIDGET_SLEEP_MAX_GAP ends the run, bounded to WIDGET_SLEEP_LOOKBACK."""
+        latest = await store.get_latest_device_reading(account_id=account_id, device_serial=serial)
+        if latest is None:
+            return None
+        newest = _as_utc(latest.recorded_at)
+        if (now - newest).total_seconds() > stale_seconds:
+            return None
+        if latest.charging or is_offline_reading(latest):
+            return None
+        kind = _sleep_kind(latest.sleep_state)
+        if kind is None:
+            return None
+
+        bound = now - WIDGET_SLEEP_LOOKBACK
+        start = prev = newest
+        # One gap's worth past the bound, so a run that reaches beyond it is
+        # recognised and reported as starting at the bound.
+        rows = await store.get_sleep_state_history(
+            account_id=account_id, device_serial=serial, since=bound - WIDGET_SLEEP_MAX_GAP
+        )
+        for recorded_at, sleep_state, charging, hr, spo2 in rows:  # newest first
+            moment = _as_utc(recorded_at)
+            if moment > newest:
+                continue
+            offline = charging or (hr is not None and hr <= 0) or (spo2 is not None and spo2 <= 0)
+            if offline or _sleep_kind(sleep_state) != kind or prev - moment > WIDGET_SLEEP_MAX_GAP:
+                break
+            start = prev = moment
+        since = max(start, bound)
+        return {
+            "state": kind,
+            "since": since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
     @app.get("/api/widget-series")
     async def widget_series(
         minutes: int = Query(default=10),
@@ -1132,10 +1206,12 @@ def create_app(
                 "warn_threshold": warn,
                 "critical_threshold": critical,
                 "points": [],
+                "sleep": None,
             }
 
         account_id, serial = chosen
-        warn, critical = resolve_o2_thresholds(accounts[account_id].get("dashboard_preferences"))
+        prefs = accounts[account_id].get("dashboard_preferences")
+        warn, critical = resolve_o2_thresholds(prefs)
         since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         rows = await store.get_spo2_series(
             account_id=account_id, device_serial=serial, since=since, limit=60 * 60
@@ -1154,11 +1230,19 @@ def create_app(
                     "spo2": int(round(spo2)),
                 }
             )
+        try:
+            sleep = await _widget_sleep(
+                account_id, serial, resolve_alert_timing(prefs)[1], datetime.now(timezone.utc)
+            )
+        except Exception:
+            logger.exception("Could not compute the widget sleep timer; sending none")
+            sleep = None
         return {
             "device_serial": serial,
             "warn_threshold": warn,
             "critical_threshold": critical,
             "points": points,
+            "sleep": sleep,
         }
 
     @app.post("/api/alert/snooze")
