@@ -18,20 +18,32 @@ const state = (changes = {}) => ({
   snooze_seconds_left: 0, signal_lost: false, devices: [device()], ...changes,
 });
 
-function page(path, { desktop = false, initial = state() } = {}) {
+const SERIES = {
+  device_serial: 'SOCK1', warn_threshold: 90, critical_threshold: 86,
+  points: [{ t: '2027-01-15T08:00:00Z', spo2: 97 }],
+};
+
+// armed: undefined -> the command answers nothing (an older shell); an object
+// -> that answer; 'hang' -> never settles; 'fail' -> rejects.
+function page(path, {
+  desktop = false, initial = state(), viewport = null, search = '', armed, series = SERIES,
+} = {}) {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, {
-      className: '', textContent: '', innerHTML: '', hidden: false,
+      className: '', textContent: '', innerHTML: '', hidden: false, title: '',
       style: { setProperty() {} },
+      setAttribute(name, value) { this[`attr:${name}`] = String(value); },
     });
     return elements.get(id);
   };
   const intervals = new Map();
   const calls = [];
   let response = initial;
+  let armedAnswer = armed;
   let failure = false;
   let overlayListener;
+  let resizeListener = () => {};
   let now = 1800000000000;
   const snooze = () => {
     response = { ...response, active_level: 'none', snoozed: true, snooze_seconds_left: 15 };
@@ -41,18 +53,28 @@ function page(path, { desktop = false, initial = state() } = {}) {
       calls.push(command);
       if (command === 'snooze_alert') snooze();
       if (command === 'overlay_state') return initial;
+      if (command === 'armed_state') {
+        if (armedAnswer === 'hang') return new Promise(() => {});
+        if (armedAnswer === 'fail') throw new Error('no answer');
+        return armedAnswer;
+      }
     } },
     event: { listen: (_name, listener) => { overlayListener = listener; } },
   };
+  const win = desktop ? { __TAURI__: tauri } : {};
+  if (viewport) Object.assign(win, { innerWidth: viewport[0], innerHeight: viewport[1] });
+  win.location = { search };
+  win.addEventListener = (name, fn) => { if (name === 'resize') resizeListener = fn; };
   vm.runInNewContext(script(path), {
-    window: desktop ? { __TAURI__: tauri } : {},
+    window: win,
     document: { getElementById: element, addEventListener() {} },
-    Date: { now: () => now },
+    Date: { now: () => now, parse: Date.parse },
     setInterval: (fn, ms) => intervals.set(ms, fn),
     fetch: async (url, options) => {
       calls.push(`${options.method || 'GET'} ${url}`);
       if (failure) throw new Error('Server disconnected');
       if (options.method === 'POST') snooze();
+      if (url.startsWith('/api/widget-series')) return { ok: true, json: async () => series };
       return { ok: true, json: async () => response };
     },
   });
@@ -62,8 +84,19 @@ function page(path, { desktop = false, initial = state() } = {}) {
     disconnect: () => { failure = true; },
     advance: (ms) => { now += ms; },
     push: (value) => overlayListener({ payload: value }),
+    setArmed: (value) => { armedAnswer = value; },
+    resize: (w, h) => { win.innerWidth = w; win.innerHeight = h; resizeListener(); },
+    poll: async () => { await p_poll(intervals); },
+    now: () => now,
   };
 }
+async function p_poll(intervals) { await intervals.get(2000)(); await flush(); }
+const text = (html) => html.replace(/<span class="sep">·<\/span>/g, ' · ')
+  .replace(/<[^>]*>/g, '').replace(/&amp;/g, '&');
+const normal = (changes = {}) => state({
+  level: 'none', active_level: 'none',
+  devices: [device({ level: 'none', spo2: 97, heart_rate: 147, device_serial: 'SOCK1', ...changes })],
+});
 
 for (const desktop of [true, false]) {
   test(`widget snooze uses ${desktop ? 'Tauri' : 'HTTP'} and refreshes the countdown`, async () => {
@@ -215,4 +248,407 @@ test('overlay preserves flash phase on repeated pushes and restarts on level, mo
   p.intervals.get(500)();
   p.push(value);
   assert.match(p.element('flash').className, /full lit/);
+});
+
+// ---- v0.2 widget (V8) ------------------------------------------------------
+
+test('snooze button text follows the configured snooze length, 15 s only when missing', async () => {
+  const p = page('app/widget_page.py', { initial: state({ snooze_seconds: 30 }) });
+  await flush();
+  assert.equal(p.element('snooze').textContent, 'Snooze 30 s');
+  assert.equal(p.element('snooze').hidden, false);
+  p.respond(state({ snooze_seconds: 120 }));
+  await p.poll();
+  assert.equal(p.element('snooze').textContent, 'Snooze 120 s');
+  p.respond(state());
+  await p.poll();
+  assert.equal(p.element('snooze').textContent, 'Snooze 15 s');
+});
+
+for (const level of ['red', 'amber']) {
+  test(`acknowledged ${level} alert keeps its colour, shows time left, and has no flash or snooze`, async () => {
+    const spo2 = level === 'red' ? 84 : 88;
+    const p = page('app/widget_page.py', { initial: state({
+      level, active_level: 'none', acknowledged: true, ack_seconds_left: 420,
+      acknowledged_until: '2027-01-15T08:07:00Z', devices: [device({ level, spo2 })],
+    }) });
+    await flush();
+    assert.equal(p.element('status').textContent, `Acknowledged — ${spo2}% · 7m left`);
+    assert.equal(p.element('status').className, `status ${level}`);
+    assert.equal(p.element('frame').className, `ack-${level}`);
+    assert.doesNotMatch(p.element('frame').className, /alert-/);
+    assert.equal(p.element('snooze').hidden, true);
+    assert.equal(p.element('msnooze').hidden, true);
+    assert.equal(text(p.element('micro').innerHTML), `${spo2} · Ack 7m`);
+    // Too wide for the pill (e.g. fallback font): drop the time, keep the words.
+    Object.assign(p.element('micro'), { scrollWidth: 90, clientWidth: 76 });
+    p.intervals.get(1000)();
+    assert.equal(text(p.element('micro').innerHTML), `${spo2} · Ack`);
+    Object.assign(p.element('micro'), { scrollWidth: 0, clientWidth: 0 });
+    p.advance(400 * 1000);
+    p.intervals.get(1000)();
+    assert.equal(p.element('status').textContent, `Acknowledged — ${spo2}% · 20s left`);
+  });
+}
+
+test('acknowledged after recovery shows the reading tier, and escalation flashes again', async () => {
+  const p = page('app/widget_page.py', { initial: state({
+    level: 'none', active_level: 'none', acknowledged: true, ack_seconds_left: 170,
+    devices: [device({ level: 'none', spo2: 96 })],
+  }) });
+  await flush();
+  assert.equal(p.element('status').textContent, 'Acknowledged — 96% · 3m left');
+  assert.equal(p.element('frame').className, '');
+  // The server ends the acknowledge on escalation: active_level is red again.
+  p.respond(state({ acknowledged: false }));
+  await p.poll();
+  assert.equal(p.element('frame').className, 'alert-red');
+  assert.equal(p.element('snooze').hidden, false);
+});
+
+test('armed dot: mint when armed, hidden in a browser', async () => {
+  const armed = page('app/widget_page.py', { desktop: true, initial: normal(), armed: { armed: true, problems: [] } });
+  await flush();
+  assert.equal(armed.element('dot').hidden, false);
+  assert.equal(armed.element('dot').className, 'dot armed');
+  assert.equal(armed.element('dot').title, 'Alerts armed on this PC');
+  assert.equal(armed.element('dot')['attr:aria-label'], 'Alerts armed on this PC');
+  assert.equal(armed.element('mdot').className, 'dot armed');
+  assert.equal(armed.element('status').textContent, 'Updated 0s ago');
+  assert.ok(armed.calls.includes('armed_state'));
+
+  const browser = page('app/widget_page.py', { initial: normal() });
+  await flush();
+  assert.equal(browser.element('dot').hidden, true);
+  assert.equal(browser.element('mdot').hidden, true);
+  assert.ok(!browser.calls.includes('armed_state'));
+});
+
+test('armed dot: a fault shows amber with the first problem as the status line', async () => {
+  const p = page('app/widget_page.py', { desktop: true, initial: normal(), armed: { armed: false, problems: [
+    { code: 'muted', text: 'Windows is muted' }, { code: 'sleep', text: 'PC may sleep' },
+    { code: 'not_collecting', text: 'Sock off' },
+  ] } });
+  await flush();
+  assert.equal(p.element('dot').className, 'dot fault');
+  assert.equal(p.element('dot').title, 'Windows is muted');
+  assert.equal(p.element('status').textContent, 'Windows is muted');
+  // The numbers are still shown in every size.
+  assert.equal(p.element('spo2').innerHTML, '97<small>%</small>');
+  assert.equal(text(p.element('micro').innerHTML), '97 · 147');
+});
+
+test('armed dot: only not_collecting is a grey "Not monitoring"', async () => {
+  const p = page('app/widget_page.py', {
+    desktop: true, initial: normal({ sock_reporting: false }),
+    armed: { armed: false, problems: [{ code: 'not_collecting', text: 'Sock off' }] },
+  });
+  await flush();
+  assert.equal(p.element('dot').className, 'dot idle');
+  assert.equal(p.element('status').textContent, 'Not monitoring · Sock off');
+  assert.equal(p.element('status').className, 'status grey');
+  assert.equal(text(p.element('micro').innerHTML), 'Sock off');
+});
+
+for (const silence of ['hang', 'fail']) {
+  test(`armed dot: unknown after 15 s without an answer (${silence})`, async () => {
+    const p = page('app/widget_page.py', { desktop: true, initial: normal(), armed: { armed: true, problems: [] } });
+    await flush();
+    assert.equal(p.element('dot').className, 'dot armed');
+    p.setArmed(silence);
+    p.advance(14000);
+    await p.poll();
+    assert.equal(p.element('dot').className, 'dot armed');
+    p.advance(2000);
+    await p.poll();
+    assert.equal(p.element('dot').className, 'dot fault');
+    assert.equal(p.element('status').textContent, 'Alert status unknown');
+    p.setArmed({ armed: true, problems: [] });
+    await p.poll();
+    assert.equal(p.element('dot').className, 'dot armed');
+    assert.match(p.element('status').textContent, /^Updated/);
+  });
+}
+
+test('armed dot: never answered says "Checking alert status"', async () => {
+  const p = page('app/widget_page.py', { desktop: true, initial: normal() });
+  await flush();
+  assert.equal(p.element('dot').className, 'dot checking');
+  assert.equal(p.element('dot').title, 'Checking alert status');
+  assert.equal(p.element('status').textContent, 'Checking alert status');
+});
+
+test('an alert status line beats the armed problem, and the dot stays visible', async () => {
+  const p = page('app/widget_page.py', { desktop: true, initial: state(), armed: { armed: false, problems: [
+    { code: 'muted', text: 'Windows is muted' },
+  ] } });
+  await flush();
+  assert.equal(p.element('status').textContent, 'Low oxygen · 0s ago');
+  assert.equal(p.element('status').className, 'status red');
+  assert.equal(p.element('frame').className, 'alert-red');
+  assert.equal(p.element('dot').hidden, false);
+  assert.equal(p.element('dot').className, 'dot fault');
+  p.respond(state({ level: 'amber', active_level: 'amber', devices: [device({ level: 'amber', spo2: 88 })] }));
+  await p.poll();
+  assert.equal(p.element('status').textContent, 'Oxygen warning · 0s ago');
+  assert.equal(p.element('frame').className, 'alert-amber');
+});
+
+test('the armed dot pulses once per new sample, not on repeats or the TEST device', async () => {
+  const at = (iso) => normal({ recorded_at: iso });
+  const p = page('app/widget_page.py', { desktop: true, initial: at('2027-01-15T08:00:00Z'), armed: { armed: true, problems: [] } });
+  await flush();
+  assert.equal(p.element('dot').className, 'dot armed');
+  p.respond(at('2027-01-15T08:00:00Z'));
+  await p.poll();
+  assert.equal(p.element('dot').className, 'dot armed');
+  p.respond(at('2027-01-15T08:00:04Z'));
+  await p.poll();
+  assert.equal(p.element('dot').className, 'dot armed beat1');
+  p.intervals.get(1000)();
+  assert.equal(p.element('dot').className, 'dot armed beat1');   // re-render keeps the class: no restart
+  p.respond(at('2027-01-15T08:00:08Z'));
+  await p.poll();
+  assert.equal(p.element('dot').className, 'dot armed beat2');
+  const withTest = at('2027-01-15T08:00:08Z');
+  withTest.devices.push(device({ device_serial: 'TEST', recorded_at: '2027-01-15T09:00:00Z' }));
+  p.respond(withTest);
+  await p.poll();
+  assert.equal(p.element('dot').className, 'dot armed beat2');
+});
+
+test('size follows the viewport, and ?size= overrides it', async () => {
+  for (const [vp, size] of [[[110, 32], 'micro'], [[300, 120], 'compact'], [[300, 200], 'expanded'], [null, 'compact']]) {
+    const p = page('app/widget_page.py', { initial: normal(), viewport: vp });
+    await flush();
+    assert.match(p.element('app').className, new RegExp(`^size-${size}\\b`), `viewport ${vp}`);
+  }
+  const q = page('app/widget_page.py', { initial: normal(), viewport: [300, 200], search: '?size=micro' });
+  await flush();
+  assert.match(q.element('app').className, /^size-micro\b/);
+  const r = page('app/widget_page.py', { initial: normal(), viewport: [300, 120] });
+  await flush();
+  r.resize(110, 32);
+  assert.match(r.element('app').className, /^size-micro\b/);
+});
+
+test('micro pill says something in words in every state, not colour alone', async () => {
+  const p = page('app/widget_page.py', { initial: normal(), viewport: [110, 32] });
+  assert.equal(text(p.element('micro').innerHTML), 'Connecting');
+  await flush();
+  const cases = [
+    [normal(), '97 · 147'],
+    [normal({ stale: true }), 'No data'],
+    [normal({ sock_reporting: false }), 'Sock off'],
+    [normal({ sock_reporting: false, charging: true }), 'Charging'],
+    [state({ level: 'amber', active_level: 'amber', signal_lost: true,
+      devices: [device({ level: 'amber', signal_lost: true, stale: true })] }), 'Lost'],
+    [state({ level: 'amber', active_level: 'none', signal_lost: true, snoozed: true, snooze_seconds_left: 9,
+      devices: [device({ level: 'amber', signal_lost: true, stale: true })] }), 'Lost · Zz 9s'],
+    [state(), '84'],
+    [state({ active_level: 'none', snoozed: true, snooze_seconds_left: 12 }), '84 · Zz 12s'],
+    [state({ level: 'none', active_level: 'none', collecting: false, devices: [] }), 'Off'],
+  ];
+  for (const [value, expected] of cases) {
+    p.respond(value);
+    await p.poll();
+    assert.equal(text(p.element('micro').innerHTML), expected);
+  }
+  // Red alert: flashing frame plus a Snooze button with the same path.
+  p.respond(state());
+  await p.poll();
+  assert.equal(p.element('frame').className, 'alert-red');
+  assert.equal(p.element('msnooze').hidden, false);
+  assert.equal(p.element('msnooze').className, 'red');
+  p.element('msnooze').onclick();
+  await flush();
+  assert.ok(p.calls.includes('POST /api/alert/snooze'));
+  assert.equal(text(p.element('micro').innerHTML), '84 · Zz 15s');
+  // Server drops within 10 minutes of an alert: like compact, it says signal lost.
+  p.disconnect();
+  await p.poll();
+  assert.equal(text(p.element('micro').innerHTML), 'Signal lost');
+  // Server drops with nothing alerting: plainly "No server".
+  p.respond(normal());
+  await p.poll();
+  p.disconnect();
+  await p.poll();
+  assert.equal(text(p.element('micro').innerHTML), 'No server');
+  assert.equal(p.element('frame').className, 'stale');
+});
+
+test('micro pill keeps a disconnection after an alert flashing as signal lost', async () => {
+  const p = page('app/widget_page.py', { initial: state(), viewport: [110, 32] });
+  await flush();
+  p.disconnect();
+  await p.poll();
+  assert.equal(p.element('frame').className, 'alert-amber');
+  assert.equal(text(p.element('micro').innerHTML), 'Signal lost');
+});
+
+test('micro snooze in the desktop app uses the Tauri snooze command', async () => {
+  const p = page('app/widget_page.py', { desktop: true, initial: state(), viewport: [110, 32] });
+  await flush();
+  p.element('msnooze').onclick();
+  await flush();
+  assert.ok(p.calls.includes('snooze_alert'));
+  assert.ok(!p.calls.includes('POST /api/alert/snooze'));
+});
+
+test('expanded size fetches the 10-minute series, draws the thresholds, and rate-limits', async () => {
+  const at = (iso, spo2 = 97) => normal({ recorded_at: iso, spo2 });
+  const p = page('app/widget_page.py', { initial: at('2027-01-15T08:00:00Z'), viewport: [300, 200] });
+  await flush();
+  await flush();
+  const fetches = () => p.calls.filter((c) => c === 'GET /api/widget-series?minutes=10').length;
+  assert.equal(fetches(), 1);
+  const spark = p.element('spark').innerHTML;
+  assert.match(spark, /data-th="warn"/);
+  assert.match(spark, /data-th="crit"/);
+  assert.match(text(spark), /90.*86/);
+  // No new sample: no refetch, even after 30 s.
+  p.advance(31000);
+  await p.poll();
+  assert.equal(fetches(), 1);
+  // A new sample within 30 s of the last fetch: wait for the 30 s mark.
+  const p2 = page('app/widget_page.py', { initial: at('2027-01-15T08:00:00Z'), viewport: [300, 200] });
+  await flush();
+  const fetches2 = () => p2.calls.filter((c) => c.startsWith('GET /api/widget-series')).length;
+  assert.equal(fetches2(), 1);
+  p2.respond(at('2027-01-15T08:00:05Z'));
+  p2.advance(5000);
+  await p2.poll();
+  assert.equal(fetches2(), 1);
+  p2.advance(26000);
+  await p2.poll();
+  assert.equal(fetches2(), 2);
+
+  const compact = page('app/widget_page.py', { initial: normal(), viewport: [300, 120] });
+  await flush();
+  await compact.poll();
+  assert.ok(!compact.calls.some((c) => c.startsWith('GET /api/widget-series')));
+});
+
+test('expanded trace draws the series and the live reading from the same device', async () => {
+  const p = page('app/widget_page.py', {
+    initial: normal({ recorded_at: new Date(1800000000000).toISOString(), spo2: 95 }),
+    viewport: [300, 200],
+    series: { ...SERIES, points: [
+      { t: new Date(1800000000000 - 200000).toISOString(), spo2: 97 },
+      { t: new Date(1800000000000 - 130000).toISOString(), spo2: 96 },
+    ] },
+  });
+  await flush();
+  await flush();
+  const spark = p.element('spark').innerHTML;
+  const line = spark.match(/<polyline class="trace" points="([^"]+)"/);
+  assert.ok(line, spark);
+  assert.equal(line[1].split(' ').length, 2);   // gap > 90 s before the live point: a new segment
+  assert.equal((spark.match(/<polyline/g) || []).length, 2);
+  assert.match(spark, /class="end"/);
+});
+
+test('expanded trace with no points shows the empty text on its own backing, still with thresholds', async () => {
+  const p = page('app/widget_page.py', {
+    initial: state({ level: 'none', active_level: 'none', collecting: false, devices: [] }),
+    viewport: [300, 200], series: { ...SERIES, device_serial: null, points: [] },
+  });
+  await flush();
+  await flush();
+  const spark = p.element('spark').innerHTML;
+  // Placed in the band above the warn line (90 of 83–100 sits at 59% down).
+  assert.match(spark, /<div class="msg" style="top:calc\(4px \+ \(100% - 8px\) \* 0\); bottom:calc\(4px \+ \(100% - 8px\) \* 0\.4\)"><span>No oxygen readings in the last 10 min<\/span><\/div>/);
+  assert.doesNotMatch(spark, /<polyline/);
+  assert.match(spark, /data-th="warn"/);
+});
+
+test('expanded size refetches at once when a different device starts alerting', async () => {
+  const p = page('app/widget_page.py', { initial: normal(), viewport: [300, 200] });
+  await flush();
+  const fetches = () => p.calls.filter((c) => c.startsWith('GET /api/widget-series')).length;
+  assert.equal(fetches(), 1);
+  p.advance(6000);
+  p.respond(state({ devices: [device({ device_serial: 'SOCK2' })] }));
+  await p.poll();
+  assert.equal(fetches(), 2);
+});
+
+test('awake note shows only on a change after the first value, for 60 s', async () => {
+  const p = page('app/widget_page.py', { initial: { ...normal(), awake_event_id: 3 }, viewport: [300, 120] });
+  await flush();
+  assert.equal(p.element('awake').hidden, true);   // first value seen: silent
+  p.respond({ ...normal(), awake_event_id: 3 });
+  await p.poll();
+  assert.equal(p.element('awake').hidden, true);
+  p.respond({ ...normal(), awake_event_id: null });
+  await p.poll();
+  assert.equal(p.element('awake').hidden, true);
+  p.respond({ ...normal(), awake_event_id: 4 });
+  await p.poll();
+  assert.equal(p.element('awake').hidden, false);
+  assert.equal(p.element('awakeMark').hidden, false);
+  assert.equal(p.element('frame').className, '');      // no flash
+  assert.equal(p.element('snooze').hidden, true);      // nothing to snooze
+  p.advance(59000);
+  p.intervals.get(1000)();
+  assert.equal(p.element('awake').hidden, false);
+  p.advance(2000);
+  p.intervals.get(1000)();
+  assert.equal(p.element('awake').hidden, true);
+});
+
+test('awake note: a first value of null is recorded silently too', async () => {
+  const p = page('app/widget_page.py', { initial: { ...normal(), awake_event_id: null } });
+  await flush();
+  assert.equal(p.element('awake').hidden, true);
+  p.respond({ ...normal(), awake_event_id: 1 });
+  await p.poll();
+  assert.equal(p.element('awake').hidden, false);
+});
+
+for (const [name, alert] of [
+  ['an active red alert', state()],
+  ['an active amber alert', state({ level: 'amber', active_level: 'amber', devices: [device({ level: 'amber', spo2: 88 })] })],
+  ['an acknowledged red alert', state({ active_level: 'none', acknowledged: true, ack_seconds_left: 300 })],
+  ['a snoozed red alert', state({ active_level: 'none', snoozed: true, snooze_seconds_left: 10 })],
+]) {
+  test(`awake note never shows during ${name}`, async () => {
+    const p = page('app/widget_page.py', { initial: { ...normal(), awake_event_id: 1 } });
+    await flush();
+    p.respond({ ...alert, awake_event_id: 2 });
+    await p.poll();
+    assert.equal(p.element('awake').hidden, true);
+    assert.equal(p.element('awakeMark').hidden, true);
+    if (alert.active_level !== 'none') {
+      assert.equal(p.element('frame').className, `alert-${alert.active_level}`);
+      assert.equal(p.element('snooze').hidden, false);
+    }
+    // Still inside the 60 s window once the alert clears: the note may return.
+    p.respond({ ...normal(), awake_event_id: 2 });
+    await p.poll();
+    assert.equal(p.element('awake').hidden, false);
+  });
+}
+
+test('alert flash is unchanged by the new states: alert-<level> exactly when active_level is amber/red', async () => {
+  const p = page('app/widget_page.py', { desktop: true, initial: normal(), armed: { armed: true, problems: [] } });
+  await flush();
+  const combos = [
+    [{}, ''],
+    [{ level: 'red', active_level: 'red' }, 'alert-red'],
+    [{ level: 'amber', active_level: 'amber' }, 'alert-amber'],
+    [{ level: 'red', active_level: 'red', awake_event_id: 7 }, 'alert-red'],
+    [{ level: 'red', active_level: 'red', acknowledged: false }, 'alert-red'],
+    [{ level: 'red', active_level: 'none', snoozed: true, snooze_seconds_left: 5 }, ''],
+    [{ level: 'red', active_level: 'none', acknowledged: true, ack_seconds_left: 100 }, 'ack-red'],
+    // Never sent by the server, but an active level must still win over acknowledged.
+    [{ level: 'red', active_level: 'red', acknowledged: true, ack_seconds_left: 100 }, 'alert-red'],
+  ];
+  for (const [changes, cls] of combos) {
+    p.respond({ ...normal(), ...changes });
+    await p.poll();
+    assert.equal(p.element('frame').className, cls, JSON.stringify(changes));
+    assert.equal(p.element('snooze').hidden, !cls.startsWith('alert-'));
+    if (cls.startsWith('alert-')) assert.doesNotMatch(p.element('status').textContent, /Acknowledged/);
+  }
 });
