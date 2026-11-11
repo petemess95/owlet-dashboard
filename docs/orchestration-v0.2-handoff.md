@@ -1,6 +1,143 @@
-# v0.2 part 1 handoff
+# v0.2 handoff (parts 1 and 2)
 
-Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Parts 2 and 3 know only what is in the repository; this file is the record of what part 1 did, changed and left open. Where it disagrees with [plan-v0.2.md](plan-v0.2.md) or [orchestration-v0.2.md](orchestration-v0.2.md), this file is newer.
+Written by the part 1 orchestrator on 2026-11-11, when part 1 closed, and extended by the part 2 orchestrator on 2026-11-11, when part 2 closed. Part 3 knows only what is in the repository; this file is the record of what parts 1 and 2 did, changed and left open. Where it disagrees with [plan-v0.2.md](plan-v0.2.md) or [orchestration-v0.2.md](orchestration-v0.2.md), this file is newer.
+
+- The **"Part 2"** section below is part 2's record.
+- The **package status table** is current as of part 2's close.
+- Every other section is part 1's record and still applies unless the Part 2 section says otherwise.
+
+## Part 2 (waves 5–7)
+
+### Branch and commit
+
+- **Branch:** `v0.2`. Never pushed.
+- **Part 2 commits, in order:**
+  - `1006648` R5
+  - `b04f4d3` docs: controller snooze is chosen-button only
+  - `9af6382` V7
+  - `aa43384` R6
+  - `c2a6b15` V8
+  - `fd17eb8` R6b (PlayStation pads, see below)
+  - `5ead3bc` V10
+  - `d83325b` R7
+- **Last package commit:** `d83325b` (R7). The commit that updates this file and the guide follows it.
+- **Checks at close (on `d83325b`):**
+  - pytest: 242 passed.
+  - `node --test tests/widget_alerts.test.cjs`: 40 passed.
+  - `cargo test --locked --offline`: 116 passed, 1 ignored. The ignored test is `debug_enumerate_sony_hid`, a hands-on probe.
+  - clippy: clean.
+- **Desktop app:**
+  - The sidecar was rebuilt and `cargo build --locked --offline` succeeds.
+  - The debug build started its own v0.2 server on 8877 and created its windows.
+  - It logged `startup mode: ShownWithSettings`.
+
+### User decisions
+
+- **V10 tier and scope:** V10 ran on the **O** tier, not H, and did both jobs: the logo and icon redraw, and moving `auth_pages.py` onto `theme.css`.
+- **Controller snooze is chosen-button only:** the "Any button" mode was removed. The plan (§3, §5 B2) and guide §4 were updated in `b04f4d3`.
+- **The 2-second guard applies to the chosen button.**
+- **PlayStation support (R6b):**
+  - The user's DualSense Edge runs through DS4Windows, which outputs a virtual DualShock 4 (`ViiperDS4`), so XInput saw no controller and capture always timed out. That was the R6 hands-on failure.
+  - The user chose to add PlayStation support rather than switch DS4Windows to Xbox output. It ran as an extra package, R6b, on the **OM** tier: a failure on O goes to the user, and the user took the suggested OM.
+
+### Contract changes (all written into guide §4)
+
+- **Hotkey strings (R5/V7):**
+  - Format: modifiers from `Ctrl`, `Alt`, `Shift`, `Super`, in that order, then one `KeyboardEvent.code` key, joined with `+`.
+  - At least one modifier is needed, except that `F1`–`F24` may stand alone.
+  - Two actions can't share a combination.
+  - A combination another app holds is rejected with `{error: {field, message}}`.
+- **`controller_mode`:** `off` / `chosen` (`any` was removed). A loaded `any` loads as `off`.
+- **`controller_buttons` (R6b):**
+  - Still an XInput-layout mask, 0–65535. PlayStation buttons are translated into the same bits:
+    - Cross→A, Circle→B, Square→X, Triangle→Y
+    - L1/R1→LB/RB, L3/R3→thumb clicks
+    - Options→Start, Share/Create→Back
+    - D-pad→D-pad
+  - Two new bits: **PS button `0x0400`** and **touchpad click `0x0800`**.
+  - L2/R2 and the sticks are never buttons.
+- **Start with Windows (R7):**
+  - The Run entry is named `Owlet Dashboard` and launches the exe with `--autostart`.
+  - Saving `autostart` changes the OS entry. A failure returns `{error: {field: "autostart", message}}` and the value isn't saved.
+- **First run (R7):**
+  - The main window URL gets `#settings=desktop` while `first_run_test_done` is false.
+  - `app/shell.py` handles it once on load through `window.owletOpenSettings(name)`, which opens Settings on that pane.
+
+### Where the code differs from the plan
+
+- **R6b** is an extra package, outside the 28. Controller snooze reads two kinds of pad:
+  - XInput pads in slots 0–3.
+  - Sony HID pads (DualShock 4 `05C4`/`09CC`, DualSense `0CE6`, DualSense Edge `0DF2`; USB and Bluetooth reports) in slots 4–7, in the new `controller_hid.rs`.
+  - It handles held pads during HID capture as follows:
+    - Capture waits up to 300 ms for newly opened pads' first report, so a button already held is ignored.
+    - A pad that sends nothing in that window counts as not connected.
+- **R7, first run:** first run wins over a login start. Until the user confirms the test alerts, even a login start shows the dashboard with Settings → This PC open.
+- **R7, Run entry sync:** if `autostart` is saved on, startup rewrites the entry every launch so it points at the running exe. If it's saved off, startup removes the entry.
+- **R7, elevated runs:** `tauri-plugin-autostart` on Windows tries HKLM first and falls back to HKCU only when access is denied. If the app is run elevated, the entry lands in HKLM.
+- **V8, sleep timer:** not built. The plan's expanded widget shows one, but no API the widget reads carries sleep data. It needs a small server addition, at integration or later.
+- **V8, real window sizes:** the three widget sizes work in a browser. The real window sizes need R9's `set_widget_mode`.
+- **V10, design choices:**
+  - The owl face moved down about 30 px, and the mint pulse trace is now its mouth. The faint top arc was dropped.
+  - The beak is dusty rose `--awake` #d9b0a5, kept away from the alert amber and red.
+  - The service-worker cache is now **v5**, and `tests/test_api.py` asserts v5.
+  - `auth_pages.py` keeps one shared block of page-local non-colour styles (`_BASE_STYLES`) plus `color-scheme` and `--radius-field: 14px`.
+- **V10, desktop icons:** the Tauri app icons (`desktop/src-tauri/icons/`) were **not** regenerated; V10 covers `app/static` only. Do this at integration, for example with `tauri icon` from the new `logo.svg` or the 512 icon.
+- **Snooze "15 s":**
+  - The shell's `do_snooze` hard-codes 15 s, but each poll resets `snoozed_until` from the server's `snooze_seconds_left`. The real length follows the setting.
+  - The tray label "Snooze alert (15 s)" is still wrong. **R8 fixes it.**
+  - V8 fixed the widget text. V9 still has to fix `overlay.html`.
+
+### Orchestrator decisions written into briefs
+
+- **R5:**
+  - Acknowledge and click-through hotkeys are logging placeholders (`do_acknowledge`, `do_toggle_click_through` in `commands.rs`). R8 and R9 wire them up.
+  - Hotkey presses are handled on Pressed only, on a spawned thread.
+  - `PressGate` filters key repeat, with 2 s recovery.
+- **R6:**
+  - The "appearance" counter that restarts the 2 s guard bumps on every level change, including amber→red.
+  - The poller parks on a condvar while there's no alert and makes no controller calls.
+- **R6b:** HID pads are opened only during an alert or a capture. One reader thread runs per pad, using overlapped `ReadFile` with 100 ms waits. A stuck or erroring pad can never produce a press edge.
+- **R7:**
+  - The plugin is registered from Rust only; no window gets the autostart JS permission.
+  - The startup sync runs on its own thread so it can't delay the sidecar or the alert loop.
+  - In `set_desktop_settings`, the OS entry is changed last and undone if saving fails.
+- **V7:**
+  - Native checkbox switches use `role=switch`.
+  - Settings styles live in a `SETTINGS_CSS` block.
+  - The "This PC" pane sits in an inert `<template>` and is mounted only in the desktop app, behind the Tauri bridge.
+
+### Hands-on checkpoints
+
+| Checkpoint | Result |
+|---|---|
+| After R6: controller snooze in a real game | ❌ first: no controller seen (DS4Windows outputs a DualShock 4) → R6b → ✅ capture and snooze confirmed by the user with a DualSense Edge via DS4Windows. `desktop.log` shows `controller snooze: slot 4 (PlayStation)`. The chosen button is the PS button (`0x0400`). |
+
+### Known issues and unverified items
+
+- **R5, not checked by hand:** OS registration of real hotkeys, the clash rejection against another app, and holding a hotkey down.
+- **R6/R6b, not checked by hand:**
+  - Whether the 2 s guard feels right; the user confirmed snooze works, not the guard.
+  - A button held when the alert appears.
+  - Xbox pads; this PC has none.
+  - Bluetooth PlayStation pads, a plain DualSense, and a DualShock 4 v2.
+  - Pad unplug and replug during an alert.
+- **R7, not checked by hand:**
+  - That the window actually shows Settings → This PC on first run.
+  - A real login start: the widget only, with no dashboard.
+  - Turning the setting off from the page.
+- **R7, a Run entry exists on the user's PC:** the user's saved settings had `autostart: true`, from switching it on while testing before R7 existed. The debug build therefore wrote `HKCU\…\Run\Owlet Dashboard = "…\target\debug\owlet-dashboard-desktop.exe --autostart"`. It stays until "Start with Windows" is turned off, or until integration installs the real build, whose startup sync rewrites it.
+- **V7:** the "sec" unit label is slightly clipped at the right edge in light at desktop width.
+- **V10:**
+  - The 16 px favicon is legible but coarse, because the owl outline is a polygon.
+  - No phone-width screenshots in dark.
+  - The project `.venv` has no Pillow, so `scripts/generate_icons.py` was run with the system Python 3.12. Add Pillow to the dev setup, or note it in the README (S1).
+- **`desktop/build-sidecar.ps1`** fails under Windows PowerShell 5.1:
+  - PyInstaller writes its INFO log to stderr, and with `$ErrorActionPreference = "Stop"` the first line aborts the script.
+  - Part 2 ran the same pyinstaller command from Bash instead.
+  - Fix at integration, for example by running pyinstaller through `cmd /c` or relaxing the preference around it.
+- **Old v0.1 server:** the installed v0.1 `owlet-server.exe` on 8877 (PID 6272, parent gone, see part 1) was stopped by the part 2 orchestrator with the user's approval, so the debug build could run its own v0.2 server. The installed v0.1 app itself is unchanged.
+- **`.pytest-tmp` is wiped by each pytest run** (`--basetemp`). Two workers running pytest at once must use different `--basetemp` folders, and screenshots must not be saved there.
+- **The review server** (`.claude/launch.json`, port 8893, untracked) doesn't reload on code changes; restart it after edits.
 
 ## Changes to the guide after part 1 closed
 
@@ -9,7 +146,7 @@ Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Parts 2 an
   - **Part 2, controls (waves 5–7):** R5, R6, R7, V7, V8, V10. Includes the "After R6" controller checkpoint. Ends by updating this file and giving the part 3 kickoff prompt.
   - **Part 3, finish (waves 8–10):** R8, R9, R10, R11, V9, S1, P5, then integration.
 
-## Branch and commit
+## Branch and commit (part 1)
 
 - **Branch:** `v0.2`, cut from `fork/widget-alerts`. Never pushed.
 - **Last package commit:** `8938f30` (R4). The commit that adds this file follows it.
@@ -17,7 +154,7 @@ Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Parts 2 an
 - **Desktop app:** `cargo build --locked --offline` succeeds. The debug build started, reused the server on 8877, created its windows and logged `keep-awake hold: ok`, and was still running after 20 s.
 - **Baseline before v0.2** (at `02749e2`): pytest 144, node 13, cargo test 8, clippy clean.
 
-## Package status (28)
+## Package status (28), as of part 2 close
 
 | ID | Tier | Status |
 |---|---|---|
@@ -30,9 +167,9 @@ Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Parts 2 an
 | R2 | S | ✅ `8ce0485` |
 | R3 | O | ✅ `0e5ebbb` |
 | R4 | O | ✅ `8938f30` |
-| R5 | S | part 2 |
-| R6 | O | part 2 |
-| R7 | S | part 2 |
+| R5 | S | ✅ `1006648` |
+| R6 | O | ✅ `aa43384`, plus R6b (OM, PlayStation pads) `fd17eb8`; hands-on ✅ |
+| R7 | S | ✅ `d83325b` |
 | R8 | O | part 3 |
 | R9 | O | part 3 |
 | R10 | S | part 3 |
@@ -43,10 +180,10 @@ Written by the part 1 orchestrator on 2026-11-11, when part 1 closed. Parts 2 an
 | V4 | V | ✅ `b25ab0a` |
 | V5 | V | ✅ `08b2d3c` |
 | V6 | V | ✅ `b9aada1` |
-| V7 | OM | part 2 |
-| V8 | V | part 2 |
+| V7 | OM | ✅ `9af6382` |
+| V8 | V | ✅ `c2a6b15` |
 | V9 | V | part 3 |
-| V10 | H | part 2 |
+| V10 | O (user's change from H) | ✅ `5ead3bc` |
 | H1 | H | ✅ `e261033` |
 | S1 | S | part 3 |
 

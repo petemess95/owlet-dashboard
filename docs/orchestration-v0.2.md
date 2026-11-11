@@ -105,12 +105,22 @@ Existing commands (`snooze_alert`, `show_main`, `hide_widget`, `overlay_state`) 
 
 ### Desktop settings keys
 
-`flash_target` (`secondary` / `primary_border` / `all` / monitor id; default `secondary`), `alarm_sound` (`beep` / `two_tone` / `pulse`), `alarm_device` (`default` / `all` / device id; default `default`), `unmute_on_red` (bool, true), `alarm_volume` (20–100, 60), `hotkey_snooze`, `hotkey_acknowledge`, `hotkey_widget`, `hotkey_click_through` (strings or null), `controller_mode` (`off` / `chosen`; `any` removed in part 2), `controller_buttons` (XInput mask 0–65535, or null), `autostart` (bool, false), `keep_awake` (bool, true), `game_mode` (`auto` / `always` / `never`; default `auto`), `capture_exclusion` (bool, false), `widget_size` (default `compact`), `widget_opacity` (30–100, default 100), `first_run_test_done` (bool).
+`flash_target` (`secondary` / `primary_border` / `all` / monitor id; default `secondary`), `alarm_sound` (`beep` / `two_tone` / `pulse`), `alarm_device` (`default` / `all` / device id; default `default`), `unmute_on_red` (bool, true), `alarm_volume` (20–100, 60), `hotkey_snooze`, `hotkey_acknowledge`, `hotkey_widget`, `hotkey_click_through` (strings or null), `controller_mode` (`off` / `chosen`; `any` removed in part 2), `controller_buttons` (XInput-layout mask 0–65535, or null; PlayStation pads map onto it, see below), `autostart` (bool, false), `keep_awake` (bool, true), `game_mode` (`auto` / `always` / `never`; default `auto`), `capture_exclusion` (bool, false), `widget_size` (default `compact`), `widget_opacity` (30–100, default 100), `first_run_test_done` (bool).
 
 - **Storage:** the shell's own file, `%LOCALAPPDATA%\owlet-dashboard\desktop-settings.json`. Not `desktop-config.json`, because the server overwrites that file whole.
 - **Hotkey strings (fixed in part 2, R5/V7):** modifiers from `Ctrl`, `Alt`, `Shift`, `Super`, in that order, then one key named by its `KeyboardEvent.code` value, joined with `+` (for example `Ctrl+Shift+KeyS`, `Alt+F9`). At least one modifier, except that `F1`–`F24` may stand alone. Two actions can't share a combination. A combination another app holds is rejected with `{error: {field: "<hotkey key>", message}}` and not saved.
 - **Validation:** `set_desktop_settings` rejects bad values rather than clamping them. `controller_mode` "chosen" needs a non-zero `controller_buttons`.
 - **Loading:** a loaded file with "chosen" and no buttons, or with the removed "any", loads as "off".
+- **Controller buttons (fixed in part 2, R6b):**
+  - XInput pads are read in slots 0–3. Sony HID pads (DualShock 4, DualSense, DualSense Edge) are read in slots 4–7, with their buttons translated into the XInput bits:
+    - Cross→A `0x1000`, Circle→B `0x2000`, Square→X `0x4000`, Triangle→Y `0x8000`
+    - L1/R1→`0x0100`/`0x0200`, L3/R3→`0x0040`/`0x0080`
+    - Options→`0x0010`, Share/Create→`0x0020`
+    - D-pad→`0x0001`–`0x0008`
+  - Two extra bits: PS button `0x0400` and touchpad click `0x0800`.
+  - L2/R2 and the sticks are never buttons.
+- **Start with Windows (fixed in part 2, R7):** `autostart` drives the HKCU Run entry `Owlet Dashboard`, which launches the exe with `--autostart`. A login start builds the dashboard window hidden. A failed OS change returns `{error: {field: "autostart", message}}` and isn't saved.
+- **First run (fixed in part 2, R7):** while `first_run_test_done` is false, startup shows the dashboard at `/#settings=desktop`. `app/shell.py` handles it once through `window.owletOpenSettings(name)`, which opens Settings on that pane.
 
 ## 5. Work packages
 
@@ -159,7 +169,7 @@ Each shell package also updates `Cargo.toml`, `build.rs` and `capabilities/*.jso
 | V7 | OM | Settings page: Alerts section and desktop-only block, including the key and controller capture fields and test buttons. Uses the theme and components from V3; it does not invent new styling. | §6 | `app/shell.py` | V3, P1; contracts for R2–R7 |
 | V8 | V | Widget: restyle, three sizes, sparkline, armed dot with heartbeat, acknowledged state. Update the widget tests. | §8 | `app/widget_page.py`, `tests/test_widget_js.py`, `tests/widget_alerts.test.cjs` | V3, P2, P3; contract for R4, R9 |
 | V9 | V | Overlay restyle, with the acknowledge button | §7 D4 | `ui-placeholder/overlay.html` | R8 |
-| V10 | H | PWA theme colour, favicon and icon regeneration with the new colours via `scripts/generate_icons.py` | §7 D5.6 | `app/pwa.py`, `app/static/*`, `scripts/generate_icons.py` | V3 |
+| V10 | O (H until part 2) | PWA theme colour, favicon and icon regeneration with the new colours via `scripts/generate_icons.py` | §7 D5.6 | `app/pwa.py`, `app/static/*`, `scripts/generate_icons.py` | V3 |
 
 V4, V5 and V6 touch different files and can run together once V3 lands. V7 waits for V3 because both edit `app/shell.py`. V9 edits a file inside the shell lane's folder, so it runs between shell packages, never alongside one.
 
@@ -250,7 +260,7 @@ Show the 28-package status table whenever you stop for me.
 ```
 
 ### Counts by tier
-H: 4. S: 9. O: 8. OM: 1. V: 6. Total: 28 packages.
+H: 3. S: 9. O: 9. OM: 1. V: 6. Total: 28 packages. (V10 moved from H to O in part 2. R6b, an extra OM package added in part 2, is outside the 28.)
 
 ## 6. Brief template
 
