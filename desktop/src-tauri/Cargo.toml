@@ -23,6 +23,7 @@ serde_json = "1"
 # Win32_Media_Audio(+Endpoints), System_Com*, Variant, PropertiesSystem,
 # FunctionDiscovery: WASAPI red alarm, endpoint volume and device names;
 # PlaySoundW remains as the fallback.
+# Win32_System_Power: SetThreadExecutionState keep-awake while monitoring.
 windows = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_Foundation",
@@ -33,6 +34,7 @@ windows = { version = "0.61", features = [
     "Win32_System_Variant",
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_Devices_FunctionDiscovery",
+    "Win32_System_Power",
 ] }
 # We call this crate directly instead of tauri-plugin-notification: the plugin
 # routes through notify-rust, whose show() registers activation handlers on a

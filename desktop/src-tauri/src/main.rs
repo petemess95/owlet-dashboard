@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod alert_loop;
+mod armed;
 mod audio;
 mod commands;
 mod http;
@@ -19,7 +20,7 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -28,7 +29,7 @@ use tauri::{
     AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Wry,
 };
-use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_window_state::StateFlags;
 
@@ -37,7 +38,14 @@ const WIDGET_W: f64 = 300.0;
 const WIDGET_H: f64 = 120.0;
 const WIDGET_MARGIN: f64 = 16.0;
 
-struct ServerProcess(Mutex<Option<CommandChild>>);
+/// The sidecar we spawned (initial or watchdog restart), with a flag set
+/// once it has exited.
+pub(crate) struct Sidecar {
+    child: CommandChild,
+    exited: Arc<AtomicBool>,
+}
+
+pub(crate) struct ServerProcess(Mutex<Option<Sidecar>>);
 
 /// Shell-side alert/UI state shared by the alert thread, commands and menus.
 pub(crate) struct Shell {
@@ -48,6 +56,8 @@ pub(crate) struct Shell {
     /// What the alert thread last applied; cleared to force a re-apply.
     pub(crate) applied: Mutex<AppliedState>,
     pub(crate) snooze_generation: AtomicU64,
+    /// Latest armed verdict, `{armed, problems}`; see armed.rs.
+    pub(crate) armed: Mutex<Value>,
 }
 
 impl Default for Shell {
@@ -63,6 +73,7 @@ impl Default for Shell {
                 last_seen: None,
             }),
             snooze_generation: AtomicU64::new(0),
+            armed: Mutex::new(armed::pending_verdict()),
         }
     }
 }
@@ -73,6 +84,14 @@ impl Shell {
         // Keep this lock through all UI/audio effects: snooze cannot finish
         // between validation and starting an old alert.
         (self.snooze_generation.load(Ordering::SeqCst) == generation).then_some(applied)
+    }
+
+    pub(crate) fn armed_verdict(&self) -> Value {
+        self.armed.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    pub(crate) fn set_armed_verdict(&self, verdict: Value) {
+        *self.armed.lock().unwrap_or_else(|p| p.into_inner()) = verdict;
     }
 
     pub(crate) fn snooze(&self, action: impl FnOnce(&mut AppliedState)) {
@@ -99,10 +118,52 @@ pub(crate) fn log_line(msg: &str) {
 }
 
 fn kill_sidecar(app: &AppHandle) {
-    if let Some(child) = app.state::<ServerProcess>().0.lock().unwrap().take() {
+    let current = app.state::<ServerProcess>().0.lock().unwrap_or_else(|p| p.into_inner()).take();
+    if let Some(sidecar) = current {
         log_line("stopping sidecar");
-        let _ = child.kill();
+        let _ = sidecar.child.kill();
     }
+}
+
+/// Spawn the bundled owlet-server and record it as the current sidecar
+/// (replacing an exited one). Does not wait for it to come up.
+pub(crate) fn spawn_sidecar(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    log_line("spawning sidecar");
+    let (mut rx, child) = app.shell().sidecar("owlet-server")?.spawn()?;
+    let exited = Arc::new(AtomicBool::new(false));
+    let flag = exited.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            if let CommandEvent::Terminated(payload) = event {
+                log_line(&format!("sidecar exited: code {:?}, signal {:?}", payload.code, payload.signal));
+                break;
+            }
+        }
+        flag.store(true, Ordering::SeqCst);
+    });
+    let previous = app
+        .state::<ServerProcess>()
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .replace(Sidecar { child, exited });
+    if let Some(old) = previous {
+        if !old.exited.load(Ordering::SeqCst) {
+            let _ = old.child.kill();
+        }
+    }
+    Ok(())
+}
+
+/// True while the sidecar we spawned is still running; false when it has
+/// exited or we never spawned one (reused an existing server).
+pub(crate) fn sidecar_running(app: &AppHandle) -> bool {
+    app.state::<ServerProcess>()
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+        .is_some_and(|s| !s.exited.load(Ordering::SeqCst))
 }
 
 pub(crate) fn launcher_url() -> String {
@@ -131,10 +192,7 @@ fn set_app_user_model_id(identifier: &str) {
 fn ensure_server(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Reuse an already-running server (e.g. dev instance); otherwise spawn the sidecar.
     if TcpStream::connect(SERVER_ADDR).is_err() {
-        log_line("spawning sidecar");
-        let sidecar = app.shell().sidecar("owlet-server")?;
-        let (_rx, child) = sidecar.spawn()?;
-        app.state::<ServerProcess>().0.lock().unwrap().replace(child);
+        spawn_sidecar(app.handle())?;
         // A cold onefile exe self-extracts before booting — allow up to 45s.
         for _ in 0..300 {
             if TcpStream::connect(SERVER_ADDR).is_ok() {
@@ -257,7 +315,8 @@ fn main() {
             commands::get_desktop_settings,
             commands::set_desktop_settings,
             commands::list_monitors,
-            commands::list_audio_devices
+            commands::list_audio_devices,
+            commands::armed_state
         ])
         .manage(ServerProcess(Mutex::new(None)))
         .manage(Shell::default())

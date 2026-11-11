@@ -1,13 +1,20 @@
+use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
-use crate::audio::{start_alarm, stop_alarm};
+use crate::armed::{
+    first_fault, pending_verdict, prune_history, set_execution_state, verdict, want_keep_awake, watchdog_decision,
+    KeepAwake, VerdictInputs, Watch,
+};
+use crate::audio::{audio_status, endpoint_facts, start_alarm, stop_alarm};
 use crate::http::http_json;
 use crate::overlay::{hide_overlay, overlay_payload, pick_target, show_overlay, update_overlay_text};
-use crate::tray::{set_tooltip, tooltip_for};
+use crate::tray::{armed_tooltip, set_tooltip};
+#[cfg(test)]
+use crate::tray::tooltip_for;
 use crate::{log_line, Shell};
 
 const ALERT_POLL: Duration = Duration::from_secs(2);
@@ -24,8 +31,20 @@ pub(crate) struct AppliedState {
     pub(crate) last_seen: Option<Instant>,
 }
 
+/// Alert-thread state behind the armed verdict, keep-awake and watchdog.
+#[derive(Default)]
+struct ArmedTracker {
+    /// Last good /api/alert-state.
+    last_state: Option<Value>,
+    last_collecting: bool,
+    keep_awake: KeepAwake,
+    restarts: VecDeque<Instant>,
+    last_audio_error: Option<String>,
+}
+
 pub(crate) fn alert_loop(app: AppHandle) {
     let mut failures: u32 = 0;
+    let mut tracker = ArmedTracker::default();
     loop {
         let generation = app.state::<Shell>().snooze_generation.load(Ordering::SeqCst);
         match http_json("GET", "/api/alert-state", None) {
@@ -39,6 +58,7 @@ pub(crate) fn alert_loop(app: AppHandle) {
                 }
                 failures = 0;
                 apply_state(&app, &state, generation);
+                tracker.last_state = Some(state);
             }
             Err(err) => {
                 failures += 1;
@@ -54,8 +74,79 @@ pub(crate) fn alert_loop(app: AppHandle) {
                 }
             }
         }
+        // After the alert has been applied, so these checks never delay it.
+        // A panic here must not stop the alert loop; it reports "not armed".
+        let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| armed_tick(&app, &mut tracker, failures)));
+        if checked.is_err() {
+            log_line("armed check panicked");
+            app.state::<Shell>().set_armed_verdict(serde_json::json!({
+                "armed": false,
+                "problems": [{ "code": "server", "text": "Checking alert status" }],
+            }));
+        }
         std::thread::sleep(ALERT_POLL);
     }
+}
+
+/// One poll's keep-awake, watchdog and armed-verdict work. Runs on the alert
+/// thread (keep-awake belongs to the calling thread) and never blocks for
+/// more than the bounded audio query.
+fn armed_tick(app: &AppHandle, t: &mut ArmedTracker, failures: u32) {
+    let settings = app.state::<crate::settings::DesktopSettings>().get();
+    let reachable = failures < FAILS_BEFORE_GIVING_UP;
+    let state = if reachable { t.last_state.as_ref() } else { None };
+    let collecting_now = state.map(|s| s["collecting"].as_bool() == Some(true));
+
+    // Keep-awake: held while collecting and the setting is on; an outage
+    // keeps the last decision. Only calls Windows on a change.
+    let want = want_keep_awake(settings.keep_awake, collecting_now, t.last_collecting);
+    if let Some(c) = collecting_now {
+        t.last_collecting = c;
+    }
+    let held = t.keep_awake.update(want, set_execution_state);
+
+    // Watchdog: restart a dead (or never-ours) sidecar, spaced and capped.
+    let now = Instant::now();
+    prune_history(&mut t.restarts, now);
+    let decision = watchdog_decision(failures, crate::sidecar_running(app), &t.restarts, now);
+    if decision == Watch::Restart {
+        t.restarts.push_back(now);
+        log_line("watchdog: dashboard server unreachable; restarting sidecar");
+        match crate::spawn_sidecar(app) {
+            Ok(()) => crate::commands::native_toast(
+                app,
+                "Owlet Dashboard".into(),
+                "The dashboard server stopped and was restarted.".into(),
+            ),
+            Err(err) => log_line(&format!("watchdog: sidecar restart failed: {err}")),
+        }
+    } else if decision == Watch::Capped && failures == FAILS_BEFORE_GIVING_UP {
+        log_line("watchdog: restart cap reached");
+    }
+
+    let endpoints = endpoint_facts();
+    let err = endpoints.as_ref().err().cloned();
+    if err.is_some() && err != t.last_audio_error {
+        log_line(&format!("armed: audio check failed: {}", err.as_deref().unwrap_or("")));
+    }
+    t.last_audio_error = err;
+
+    let v = if reachable && t.last_state.is_none() {
+        pending_verdict()
+    } else {
+        verdict(&VerdictInputs {
+            state,
+            failures,
+            endpoints: &endpoints,
+            audio: &audio_status(),
+            alarm_device: &settings.alarm_device,
+            unmute_on_red: settings.unmute_on_red,
+            collecting: collecting_now.unwrap_or(t.last_collecting),
+            keep_awake_held: held,
+            watchdog_capped: decision == Watch::Capped,
+        })
+    };
+    app.state::<Shell>().set_armed_verdict(v);
 }
 
 pub(crate) fn unreachable_state(applied: &AppliedState, now: Instant) -> Value {
@@ -95,7 +186,8 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
         .find(|d| d["level"].as_str() == Some(level) && level != "none" && d["signal_lost"].as_bool() == Some(true))
         .or_else(|| devices.iter().find(|d| d["level"].as_str() == Some(level) && level != "none"))
         .or_else(|| devices.first());
-    set_tooltip(app, &tooltip_for(state, dev));
+    let fault = first_fault(&app.state::<Shell>().armed_verdict());
+    set_tooltip(app, &armed_tooltip(state, dev, fault.as_deref()));
 
     if active == "amber" || active == "red" {
         if active == "red" {

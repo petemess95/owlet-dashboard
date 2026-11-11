@@ -139,6 +139,11 @@ pub(crate) fn list_monitors(app: AppHandle) -> Value {
 /// the code path that actually displays, and fire it off the command thread.
 #[tauri::command]
 pub(crate) fn show_native_toast(app: AppHandle, title: String, body: String) {
+    native_toast(&app, title, body);
+}
+
+/// The toast path behind `show_native_toast`, also used by the watchdog.
+pub(crate) fn native_toast(app: &AppHandle, title: String, body: String) {
     #[cfg(windows)]
     {
         let app_id = app.config().identifier.clone();
@@ -161,4 +166,10 @@ pub(crate) fn show_native_toast(app: AppHandle, title: String, body: String) {
 #[tauri::command]
 pub(crate) async fn list_audio_devices() -> Value {
     crate::audio::list_audio_devices()
+}
+
+/// Whether this PC will sound an alert right now; see armed.rs.
+#[tauri::command]
+pub(crate) fn armed_state(app: AppHandle) -> Value {
+    app.state::<Shell>().armed_verdict()
 }

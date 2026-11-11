@@ -13,6 +13,7 @@ fn main() {
                 "set_desktop_settings",
                 "list_monitors",
                 "list_audio_devices",
+                "armed_state",
             ]),
         ),
     )

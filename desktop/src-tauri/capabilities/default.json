@@ -16,6 +16,7 @@
     "allow-get-desktop-settings",
     "allow-set-desktop-settings",
     "allow-list-monitors",
-    "allow-list-audio-devices"
+    "allow-list-audio-devices",
+    "allow-armed-state"
   ]
 }

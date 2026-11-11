@@ -52,6 +52,24 @@ pub(crate) fn tooltip_for(state: &Value, dev: Option<&Value>) -> String {
     }
 }
 
+/// Like `tooltip_for`, but in the plain "all normal" case (the vitals line or
+/// plain "Owlet Dashboard") a fault in the armed verdict replaces it. Every
+/// alert, snooze, message, signal-lost, not-collecting and stale/sock-off
+/// line is kept as is. Tooltips stay under 127 characters.
+pub(crate) fn armed_tooltip(state: &Value, dev: Option<&Value>, fault: Option<&str>) -> String {
+    let normal = state["snoozed"].as_bool() != Some(true)
+        && state["message"].as_str().is_none()
+        && !matches!(state["active_level"].as_str(), Some("red" | "amber"))
+        && state["signal_lost"].as_bool() != Some(true)
+        && state["collecting"].as_bool() != Some(false)
+        && !dev.is_some_and(|d| d["stale"].as_bool() == Some(true) || d["sock_reporting"].as_bool() == Some(false));
+    let text = match fault {
+        Some(f) if normal => format!("Owlet \u{2014} Not armed: {f}"),
+        _ => tooltip_for(state, dev),
+    };
+    text.chars().take(126).collect()
+}
+
 pub(crate) fn sync_widget_toggle(app: &AppHandle) {
     let visible = app
         .get_webview_window("widget")
@@ -147,5 +165,29 @@ mod tests {
         assert_eq!(tooltip_for(&state, None), "Owlet Dashboard (No Owlet account linked)");
         state["remote_mode"] = json!(true);
         assert_eq!(tooltip_for(&state, None), "Owlet Dashboard (viewing a remote server)");
+    }
+
+    #[test]
+    fn armed_fault_replaces_only_the_normal_line() {
+        let fault = Some("Windows is muted");
+        let normal = json!({ "active_level": "none", "collecting": true });
+        let dev = json!({ "spo2": 97, "heart_rate": 120 });
+        assert_eq!(armed_tooltip(&normal, Some(&dev), fault), "Owlet \u{2014} Not armed: Windows is muted");
+        assert_eq!(armed_tooltip(&normal, None, fault), "Owlet \u{2014} Not armed: Windows is muted");
+        assert_eq!(armed_tooltip(&normal, Some(&dev), None), tooltip_for(&normal, Some(&dev)));
+        for state in [
+            json!({ "active_level": "red" }),
+            json!({ "active_level": "amber" }),
+            json!({ "snoozed": true }),
+            json!({ "message": "Dashboard server not responding" }),
+            json!({ "signal_lost": true }),
+            json!({ "collecting": false }),
+        ] {
+            assert_eq!(armed_tooltip(&state, Some(&dev), fault), tooltip_for(&state, Some(&dev)));
+        }
+        let stale = json!({ "stale": true });
+        assert_eq!(armed_tooltip(&normal, Some(&stale), fault), "Owlet \u{2014} no recent data");
+        let long = "x".repeat(300);
+        assert!(armed_tooltip(&normal, None, Some(&long)).chars().count() < 127);
     }
 }

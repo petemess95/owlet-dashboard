@@ -189,8 +189,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// Snapshot of the last alarm's audio problems. Separate short lock, never
-/// the ALARM lock. Consumed by the armed-state package.
-#[allow(dead_code)]
+/// the ALARM lock. Consumed by the armed-state check.
 pub(crate) fn audio_status() -> AudioStatus {
     lock(&STATUS).clone()
 }
@@ -365,6 +364,41 @@ pub(crate) fn list_audio_devices() -> Value {
     }
 }
 
+/// Active render endpoints with their mute state (`None` when it could not be
+/// read) plus the default endpoint id, for the armed-state check.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct EndpointFacts {
+    pub(crate) endpoints: Vec<(String, Option<bool>)>,
+    pub(crate) default: Option<String>,
+}
+
+const ENDPOINT_QUERY_WAIT: Duration = Duration::from_millis(1500);
+static ENDPOINT_QUERY_BUSY: AtomicBool = AtomicBool::new(false);
+
+/// Presence and mute of the render endpoints, read with short-lived COM
+/// objects on a helper thread. Never touches ALARM, FALLBACK, any stream,
+/// volume or mute. Bounded: a hung query returns an error instead of
+/// blocking the caller, and no second query starts while one is stuck.
+pub(crate) fn endpoint_facts() -> Result<EndpointFacts, String> {
+    if ENDPOINT_QUERY_BUSY.swap(true, Ordering::SeqCst) {
+        return Err("previous audio endpoint query still running".into());
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("audio-armed".into()).spawn(move || {
+        let result = native::endpoint_facts();
+        ENDPOINT_QUERY_BUSY.store(false, Ordering::SeqCst);
+        let _ = tx.send(result);
+    });
+    if let Err(err) = spawned {
+        ENDPOINT_QUERY_BUSY.store(false, Ordering::SeqCst);
+        return Err(format!("could not start audio query thread: {err}"));
+    }
+    match rx.recv_timeout(ENDPOINT_QUERY_WAIT) {
+        Ok(result) => result,
+        Err(_) => Err("audio endpoint query timed out".into()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Native WASAPI / endpoint-volume code (kept thin)
 // ---------------------------------------------------------------------------
@@ -457,6 +491,26 @@ mod native {
                 (id, name, is_default)
             })
             .collect())
+    }
+
+    pub(super) fn endpoint_facts() -> Result<EndpointFacts, String> {
+        let _com = Com::init()?;
+        let e = enumerator().map_err(|e| e.to_string())?;
+        let default = default_id(&e);
+        let devices = active_devices(&e).map_err(|e| e.to_string())?;
+        let endpoints = devices
+            .into_iter()
+            .map(|(id, d)| {
+                let muted = unsafe {
+                    d.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)
+                        .and_then(|v| v.GetMute())
+                        .map(|m| m.as_bool())
+                        .ok()
+                };
+                (id, muted)
+            })
+            .collect();
+        Ok(EndpointFacts { endpoints, default })
     }
 
     fn adjust(dev: &IMMDevice, id: &str, setting: u8) -> WinResult<Adjusted> {
@@ -678,6 +732,9 @@ mod native {
     pub(super) fn restore_endpoints(_list: &[Adjusted]) {}
     pub(super) fn list_devices() -> Result<Vec<(String, String, bool)>, String> {
         Ok(Vec::new())
+    }
+    pub(super) fn endpoint_facts() -> Result<EndpointFacts, String> {
+        Err("audio endpoints are only available on Windows".into())
     }
 }
 

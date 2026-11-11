@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-armed-state"
+description = "Enables the armed_state command without any pre-configured scope."
+commands.allow = ["armed_state"]
+
+[[permission]]
+identifier = "deny-armed-state"
+description = "Denies the armed_state command without any pre-configured scope."
+commands.deny = ["armed_state"]
