@@ -2,7 +2,7 @@
 
 How to build [plan-v0.2.md](plan-v0.2.md) by delegation. The plan says **what** to build; this file says **who builds each piece, in what order, and how the work is checked**.
 
-Status: **draft**. No package has been started.
+Status: **part 1 done** (15 packages, last package commit `8938f30`). Part 2 starts from [orchestration-v0.2-handoff.md](orchestration-v0.2-handoff.md).
 
 ## 1. Roles
 
@@ -73,20 +73,43 @@ These let the three lanes work in parallel. Names are fixed; a worker implements
 
 | Command | Returns | Notes |
 |---|---|---|
-| `armed_state` | `{armed: bool, problems: [{code, text}]}` | Codes: `server`, `not_collecting`, `stale`, `no_audio`, `muted`, `sleep`, `watchdog` |
+| `armed_state` | `{armed: bool, problems: [{code, text}]}` | Codes: `server`, `not_collecting`, `stale`, `no_audio`, `muted`, `sleep`, `watchdog`. Built in R4; texts and order below. |
 | `get_desktop_settings` | settings object, below | |
 | `set_desktop_settings(patch)` | new settings object, or `{error: {field, message}}` | Rejects a clashing hotkey |
 | `list_audio_devices` | `[{id, name, is_default}]` | |
-| `list_monitors` | `[{id, name, is_primary}]` | |
+| `list_monitors` | `[{id, name, is_primary}]` | `id` is the Windows monitor name; `name` is "Display N · W×H" |
 | `capture_controller_button` | `{buttons: <mask>}` or null after 10 s | For the settings capture field |
 | `acknowledge_alert` | nothing | POSTs acknowledge, then silences locally, like `snooze_alert` |
 | `set_widget_mode({size, opacity, click_through})` | applied mode | `size`: `micro` 110×32, `compact` 300×120, `expanded` 300×200 |
 
 Existing commands (`snooze_alert`, `show_main`, `hide_widget`, `overlay_state`) are unchanged.
 
+**`armed_state` problems (fixed in R4).**
+- **Order:** faults come first, in the order `server`, `watchdog`, `no_audio`, `muted`, `sleep`, `stale`. `not_collecting` (informational) is always last.
+- **`armed`** is true only when `problems` is empty.
+- **Texts by code:**
+  - `server`: "Dashboard server not responding" after 3 failed polls. Before the first poll it is "Checking alert status".
+  - `watchdog`: "Dashboard server keeps stopping" once the restart cap (3 in 10 minutes) is reached.
+  - `no_audio`: "No audio device", "Chosen audio device not found", "Can't check the audio device", or "Alarm sound fell back to basic playback".
+  - `muted`: "Windows is muted". It appears only when `unmute_on_red` is off.
+  - `sleep`: "PC may sleep".
+  - `stale`: "No data for Nm", or "No recent data".
+  - `not_collecting`: "No Owlet account linked", "Viewing a remote server", "Sock off" or "Charging".
+- **Devices:** with more than one real device, device problems are prefixed "<account name>: ". The TEST device is ignored.
+
+**Shell-internal helpers** that later packages can use:
+- `audio::audio_status()` returns `AudioStatus {last_error, using_fallback, device_missing}`.
+- `audio::endpoint_facts()` returns each endpoint's presence and mute state.
+- `spawn_sidecar` / `sidecar_running` are in `main.rs`.
+- `commands::native_toast` shows a native toast.
+
 ### Desktop settings keys
 
-`flash_target` (`secondary` / `primary_border` / `all` / monitor id), `alarm_sound`, `alarm_device` (`default` / `all` / device id), `unmute_on_red` (bool, true), `alarm_volume` (20–100, 60), `hotkey_snooze`, `hotkey_acknowledge`, `hotkey_widget`, `hotkey_click_through` (strings or null), `controller_mode` (`off` / `chosen` / `any`), `controller_buttons` (mask or null), `autostart` (bool, false), `keep_awake` (bool, true), `game_mode` (`auto` / `always` / `never`), `capture_exclusion` (bool, false), `widget_size`, `widget_opacity` (30–100), `first_run_test_done` (bool).
+`flash_target` (`secondary` / `primary_border` / `all` / monitor id; default `secondary`), `alarm_sound` (`beep` / `two_tone` / `pulse`), `alarm_device` (`default` / `all` / device id; default `default`), `unmute_on_red` (bool, true), `alarm_volume` (20–100, 60), `hotkey_snooze`, `hotkey_acknowledge`, `hotkey_widget`, `hotkey_click_through` (strings or null), `controller_mode` (`off` / `chosen` / `any`), `controller_buttons` (XInput mask 0–65535, or null), `autostart` (bool, false), `keep_awake` (bool, true), `game_mode` (`auto` / `always` / `never`; default `auto`), `capture_exclusion` (bool, false), `widget_size` (default `compact`), `widget_opacity` (30–100, default 100), `first_run_test_done` (bool).
+
+- **Storage:** the shell's own file, `%LOCALAPPDATA%\owlet-dashboard\desktop-settings.json`. Not `desktop-config.json`, because the server overwrites that file whole.
+- **Validation:** `set_desktop_settings` rejects bad values rather than clamping them. `controller_mode` "chosen" needs a non-zero `controller_buttons`.
+- **Loading:** a loaded file with "chosen" and no buttons loads as "off".
 
 ## 5. Work packages
 
