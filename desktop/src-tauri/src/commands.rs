@@ -207,6 +207,19 @@ pub(crate) async fn list_audio_devices() -> Value {
     crate::audio::list_audio_devices()
 }
 
+/// Capture a controller button or combination for the settings page:
+/// `{buttons: mask}`, or null after 10 s without a fresh press (or when a
+/// capture is already running). Saves nothing.
+#[tauri::command]
+pub(crate) async fn capture_controller_button() -> Value {
+    tauri::async_runtime::spawn_blocking(crate::controller::capture_blocking)
+        .await
+        .unwrap_or_else(|_| {
+            log_line("controller capture panicked");
+            Value::Null
+        })
+}
+
 /// Whether this PC will sound an alert right now; see armed.rs.
 #[tauri::command]
 pub(crate) fn armed_state(app: AppHandle) -> Value {

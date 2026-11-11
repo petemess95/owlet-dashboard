@@ -14,6 +14,7 @@ fn main() {
                 "list_monitors",
                 "list_audio_devices",
                 "armed_state",
+                "capture_controller_button",
             ]),
         ),
     )

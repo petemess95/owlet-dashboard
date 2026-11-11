@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-capture-controller-button"
+description = "Enables the capture_controller_button command without any pre-configured scope."
+commands.allow = ["capture_controller_button"]
+
+[[permission]]
+identifier = "deny-capture-controller-button"
+description = "Denies the capture_controller_button command without any pre-configured scope."
+commands.deny = ["capture_controller_button"]

@@ -188,6 +188,8 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
         .or_else(|| devices.first());
     let fault = first_fault(&app.state::<Shell>().armed_verdict());
     set_tooltip(app, &armed_tooltip(state, dev, fault.as_deref()));
+    // Tell the controller poller (short lock, never blocks on XInput).
+    crate::controller::publish(&active);
 
     if active == "amber" || active == "red" {
         if active == "red" {

@@ -184,7 +184,7 @@ impl Settings {
             "hotkey_acknowledge" => self.hotkey_acknowledge = want_hotkey(key, v)?,
             "hotkey_widget" => self.hotkey_widget = want_hotkey(key, v)?,
             "hotkey_click_through" => self.hotkey_click_through = want_hotkey(key, v)?,
-            "controller_mode" => self.controller_mode = want_choice(key, v, &["off", "chosen", "any"])?,
+            "controller_mode" => self.controller_mode = want_choice(key, v, &["off", "chosen"])?,
             "controller_buttons" => {
                 self.controller_buttons =
                     if v.is_null() { None } else { Some(want_int(key, v, 0, 65535)? as u16) }
@@ -481,6 +481,14 @@ mod tests {
     }
 
     #[test]
+    fn load_removed_any_mode_falls_back_to_off() {
+        let (s, notes) = parse_lenient(r#"{"controller_mode": "any", "controller_buttons": 4096}"#);
+        assert_eq!(s.controller_mode, "off");
+        assert_eq!(s.controller_buttons, Some(4096));
+        assert!(notes[0].starts_with("controller_mode"));
+    }
+
+    #[test]
     fn load_chosen_without_buttons_falls_back_to_off() {
         let (s, _) = parse_lenient(r#"{"controller_mode": "chosen"}"#);
         assert_eq!(s.controller_mode, "off");
@@ -546,7 +554,7 @@ mod tests {
     fn enum_keys() {
         for (k, good, bad) in [
             ("alarm_sound", "two_tone", "siren"),
-            ("controller_mode", "any", "all"),
+            ("controller_mode", "off", "any"),
             ("game_mode", "never", "sometimes"),
             ("widget_size", "micro", "huge"),
         ] {

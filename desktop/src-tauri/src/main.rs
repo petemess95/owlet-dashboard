@@ -8,6 +8,7 @@ mod alert_loop;
 mod armed;
 mod audio;
 mod commands;
+mod controller;
 mod hotkeys;
 mod http;
 mod overlay;
@@ -323,7 +324,8 @@ fn main() {
             commands::set_desktop_settings,
             commands::list_monitors,
             commands::list_audio_devices,
-            commands::armed_state
+            commands::armed_state,
+            commands::capture_controller_button
         ])
         .manage(ServerProcess(Mutex::new(None)))
         .manage(Shell::default())
@@ -370,6 +372,8 @@ fn main() {
             std::thread::Builder::new()
                 .name("owlet-alerts".into())
                 .spawn(move || alert_loop::alert_loop(handle))?;
+            // Parked until an alert shows; makes no XInput calls before then.
+            controller::spawn_poller(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {

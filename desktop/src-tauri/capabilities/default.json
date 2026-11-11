@@ -17,6 +17,7 @@
     "allow-set-desktop-settings",
     "allow-list-monitors",
     "allow-list-audio-devices",
-    "allow-armed-state"
+    "allow-armed-state",
+    "allow-capture-controller-button"
   ]
 }
