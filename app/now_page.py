@@ -10,112 +10,282 @@ from app.shell import render_shell
 
 NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
   <style>
-    .today-head { display: flex; justify-content: space-between; align-items: flex-start;
-      flex-wrap: wrap; gap: 8px 16px; margin-bottom: 22px; }
-    .status-line { font-size: 17px; color: var(--dim); line-height: 1.5; margin: 0;
-      max-width: 70ch; flex: 1 1 320px; }
-    .status-line .st-short { display: none; }
-    /* Phones: one line — short status text beside a compact picker. */
-    @media (max-width: 640px) {
-      .today-head { flex-wrap: nowrap; align-items: center; }
-      .status-line { flex: 1 1 auto; min-width: 0; font-size: 15px; white-space: nowrap;
-        overflow: hidden; text-overflow: ellipsis; }
-      .status-line .st-full { display: none; }
-      .status-line .st-short { display: inline; }
-      .range-seg button, .range-seg .rs-custom { font-size: 11px; padding: 4px 7px; }
+    /* Today, night-sky layout (plan v0.2 §7 D4). Page-local custom properties
+       live on .today and only reference theme tokens; candidates for theme.css. */
+    .shell-main { max-width: 1120px; }
+    .today {
+      --today-well-radius: 14px;      /* chart wells inside a card */
+      --today-box-radius: 16px;       /* bordered boxes that must not be pills */
+      --today-meter: linear-gradient(90deg,
+        color-mix(in srgb, var(--sleep-deep) 72%, var(--surface)),
+        color-mix(in srgb, var(--series-move) 55%, var(--surface)) 60%,
+        color-mix(in srgb, var(--awake) 70%, var(--surface)));
     }
-    .status-line b { color: var(--ink); font-weight: 600; }
-    .range-seg { display: flex; background: var(--accent-soft); border-radius: var(--radius-pill);
-      padding: 3px; margin-left: auto; flex: 0 0 auto; }
-    .range-seg button { all: unset; cursor: pointer; font-size: 12px; font-weight: 600;
-      color: var(--dim); padding: 5px 11px; border-radius: var(--radius-pill);
+    .today svg.ic { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor;
+      stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* ---- status sentence + range pills ------------------------------------ */
+    .hello { display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 18px 24px; flex-wrap: wrap; padding: 14px 4px 28px; }
+    .hello-text { flex: 1 1 420px; min-width: 0; }
+    .hello h1 { margin: 0; font-size: 38px; font-weight: 700; line-height: 1.15;
+      letter-spacing: -.01em; color: var(--ink); }
+    .hello.is-low h1, .hello.is-stale h1 { color: var(--warn); }
+    .hello.is-critical h1 { color: var(--bad); }
+    .hello p { margin: 6px 0 0; color: var(--dim); font-size: 17px; line-height: 1.45;
+      max-width: 70ch; }
+    .hello p:empty { display: none; }
+    .hello p b { color: var(--ink); font-weight: 600; }
+    .range-seg, .ms-seg { display: flex; gap: 2px; padding: 4px; border-radius: var(--radius-pill);
+      background: var(--pill-track); border: 1px solid var(--surface-line); }
+    .range-seg { flex: 0 0 auto; }
+    .range-seg button, .ms-seg button { all: unset; cursor: pointer; font-size: 14px;
+      font-weight: 600; color: var(--dim); padding: 6px 15px; border-radius: var(--radius-pill);
       font-variant-numeric: tabular-nums; }
-    .range-seg button.active { background: var(--surface); color: var(--accent);
-      box-shadow: var(--shadow-lift); }
-    .range-seg .rs-custom { font-size: 12px; font-weight: 600; color: var(--accent);
-      background: var(--surface); padding: 5px 11px; border-radius: var(--radius-pill);
-      box-shadow: var(--shadow-lift); }
+    .range-seg button:hover, .ms-seg button:hover { color: var(--ink); }
+    .range-seg button.active, .ms-seg button.active, .range-seg .rs-custom {
+      background: var(--pill-active); color: var(--ink); box-shadow: var(--shadow-lift); }
+    .range-seg .rs-custom { font-size: 14px; font-weight: 600; padding: 6px 15px;
+      border-radius: var(--radius-pill); }
     .range-seg .rs-custom[hidden] { display: none; }
-    .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
-    @media (max-width: 640px) { .hero { grid-template-columns: 1fr; } }
-    .hero-minor { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 8px; }
-    .vital { padding: 22px 22px 76px; position: relative; overflow: hidden;
-      touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; }
-    .vital.dragging { cursor: grabbing; }
-    .vital.placing { cursor: crosshair; }
-    .vital .label { font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
-      color: var(--faint); font-weight: 700; }
-    .vital .value { font-size: clamp(56px, 9vw, 84px); line-height: 1.02;
-      letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-    .vital .value small { font-size: 22px; color: var(--dim); font-weight: 500;
+
+    /* ---- cards ------------------------------------------------------------- */
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
+    .tcard { padding: 28px 32px; min-width: 0; grid-column: span 12; }
+    .tcard h2 { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.25; }
+    .tcard .note { color: var(--dim); margin-top: 2px; font-size: 16px; display: flex;
+      align-items: center; gap: 4px 7px; flex-wrap: wrap; }
+    .tcard .note.warn { color: var(--warn); font-weight: 600; }
+    .tcard .note.bad { color: var(--bad); font-weight: 600; }
+    .tcard .note b { color: var(--ink); font-weight: 600; text-transform: capitalize; }
+    .card-head { display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 12px; }
+    .live-card { background: var(--surface-live); }
+    .live-chip { all: unset; font-size: 13px; font-weight: 600; color: var(--dim);
+      white-space: nowrap; padding: 5px 0; }
+    .live-chip.paused { cursor: pointer; color: var(--accent); background: var(--accent-soft);
+      padding: 5px 13px; border-radius: var(--radius-pill); }
+
+    /* ---- live readings: oxygen leads, pulse beside it ---------------------- */
+    .vitals { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 22px; }
+    .vital { --c: var(--series-o2); min-width: 0; }
+    .vital.hr { --c: var(--series-hr); }
+    .reading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px;
+      min-height: 84px; }
+    .reading svg.v-icon { width: 38px; height: 38px; fill: none; stroke: var(--c);
+      stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+    .big { font-size: 84px; font-weight: 700; line-height: 1; letter-spacing: -.01em;
+      font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+    .big .unit { font-size: 24px; color: var(--dim); margin-left: 8px; font-weight: 400;
       letter-spacing: 0; }
-    .vital.minor { padding: 16px 18px 58px; }
-    .vital.minor .value { font-size: clamp(28px, 5vw, 40px); }
-    .vital.minor .value small { font-size: 15px; }
-    .vital.minor .chartzone { height: 44px; }
     /* Two severity tiers, both user-tunable: amber warning, red critical.
-       "out" (outside this baby's own baseline band) shares the warning tier —
-       the band text under the number already says which kind of low it is.
-       --awake is the sleep-state amber and fails contrast as text; --warn is
-       the semantic caution token, so severity uses that everywhere. */
-    .vital.out .value, .vital.low .value { color: var(--warn); }
-    .vital.critical .value { color: var(--bad); }
-    .vital .band { font-size: 12.5px; color: var(--dim); margin-top: 2px; }
-    .vital.inspecting .band { color: var(--accent); font-weight: 600; }
-    .chartzone { position: absolute; left: 0; right: 0; bottom: 0; height: 60px; }
-    .chartzone svg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .6; }
+       "out" (outside this baby's own baseline band) shares the warning tier.
+       The tier is never colour alone: the .tier badge beside the number, the
+       note under the card title and the page headline all say it in words. */
+    .vital.out .big .num, .vital.low .big .num { color: var(--warn); }
+    .vital.critical .big .num { color: var(--bad); }
+    .vital.stale .big .num { color: var(--dim); }
+    .tier { display: inline-flex; align-items: center; gap: 6px; font-size: 15px;
+      font-weight: 700; padding: 5px 12px 5px 9px; border-radius: var(--radius-pill);
+      white-space: nowrap; color: var(--warn);
+      background: color-mix(in srgb, currentColor 14%, transparent); }
+    .tier.critical { color: var(--bad); }
+    .tier[hidden] { display: none; }
+    .vital-tools { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+    .vital .label { color: var(--dim); font-size: 18px; margin: 2px 0 14px 54px;
+      display: flex; gap: 2px 14px; flex-wrap: wrap; align-items: baseline; }
+    .band { font-size: 14.5px; color: var(--dim); }
+    .inspecting .band { color: var(--accent); font-weight: 600; }
+
+    /* ---- chart wells ------------------------------------------------------- */
+    .plot { position: relative; height: 170px; background: var(--surface-inset);
+      border-radius: var(--today-well-radius); overflow: hidden;
+      touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; }
+    .plot.dragging { cursor: grabbing; }
+    .plot.placing { cursor: crosshair; outline: 2px solid var(--accent); outline-offset: -2px; }
+    .chartzone svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
     .chartzone polyline, .ms-chartwrap polyline { fill: none; stroke: var(--accent);
-      stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round;
+      stroke-width: 2; stroke-linejoin: round; stroke-linecap: round;
       vector-effect: non-scaling-stroke; }
+    .ms-chartwrap polyline { stroke-width: 1.6; }
+    /* thresholds on the oxygen trace: amber = warning tier, red = critical */
+    .threshold { stroke-width: 1; stroke-dasharray: 3 6; opacity: .7;
+      vector-effect: non-scaling-stroke; }
+    .threshold.warn { stroke: var(--warn); }
+    .threshold.crit { stroke: var(--bad); }
+    .thlabels { position: absolute; inset: 0; pointer-events: none; }
+    .thlabels span { position: absolute; right: 10px; transform: translateY(-115%);
+      font-size: 12px; font-weight: 600; white-space: nowrap; padding: 0 5px; border-radius: 6px;
+      background: color-mix(in srgb, var(--surface-inset) 78%, transparent); }
+    .thlabels span.under { transform: translateY(15%); }
+    .thlabels .warn { color: var(--warn); }
+    .thlabels .crit { color: var(--bad); }
+    .movebar { fill: var(--series-move); }
     .chartzone line.evline, .ms-chartwrap line.evline { stroke: var(--warn);
       stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; opacity: .85; }
     .chartzone .evflag, .ms-chartwrap .evflag { fill: var(--warn); }
     /* offline ghost: holds the last reading's level through a gap, dashed grey
        so it can't be mistaken for live data */
-    .chartzone .ghostline, .ms-chartwrap .ghostline { stroke: var(--faint);
+    .chartzone .ghostline, .ms-chartwrap .ghostline { stroke: var(--dim);
       stroke-width: 1.4; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke;
       opacity: .75; }
     /* amber = the sock isn't on her properly (same language as the title dot);
        grey stays for charging and collector-off */
     .chartzone .ghostline.warn, .ms-chartwrap .ghostline.warn { stroke: var(--warn); }
-    .gaplabels span.warn { color: var(--warn); }
-    /* hypnogram: rounded state bars in three lanes, tracker-style, with thin
-       gradient connectors between stages the way Apple draws transitions */
-    /* Butt caps: rounded ones extend half the bar width past each end and
-       read as stages overlapping in time. */
-    .chartzone .sleepbar, .ms-chartwrap .sleepbar { fill: none; stroke-linecap: butt;
-      vector-effect: non-scaling-stroke; }
+    /* sleep: one band coloured by stage on the page; three lanes in the sheet.
+       Butt caps: rounded ones extend past each end and read as overlap. */
+    .sleepfill.sleep-awake { fill: var(--awake); }
+    .sleepfill.sleep-light { fill: var(--sleep-light); }
+    .sleepfill.sleep-deep { fill: var(--sleep-deep); }
+    .ms-chartwrap .sleepbar { fill: none; stroke-linecap: butt; vector-effect: non-scaling-stroke; }
     .sleepbar.sleep-awake { stroke: var(--awake); }
     .sleepbar.sleep-light { stroke: var(--sleep-light); }
     .sleepbar.sleep-deep { stroke: var(--sleep-deep); }
-    .chartzone .sleepconn, .ms-chartwrap .sleepconn { fill: none; stroke-width: 2px;
+    .ms-chartwrap .sleepconn { fill: none; stroke-width: 2px;
       opacity: .45; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-    #card-sleep .value { text-transform: lowercase; }
-    /* gap captions: tiny inline label naming why the line is dotted there */
+    /* gap captions: small inline label naming why the line is dotted there */
     .gaplabels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
     .gaplabels span { position: absolute; transform: translateX(-50%);
-      font-size: 9px; letter-spacing: .09em; text-transform: uppercase;
-      color: var(--faint); white-space: nowrap; }
-    .vital-expand { all: unset; position: absolute; top: 10px; right: 10px; z-index: 2;
-      cursor: pointer; color: var(--faint); padding: 7px 9px; border-radius: 9px;
-      font-size: 14px; line-height: 1; }
+      font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+      color: var(--dim); white-space: nowrap; }
+    .gaplabels span.warn { color: var(--warn); }
+    .xline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink);
+      opacity: .55; pointer-events: none; }
+    .ticks { display: flex; justify-content: space-between; color: var(--dim);
+      font-size: 13px; margin-top: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .ticks .ts-end.live { color: var(--accent); }
+    .vital-expand { all: unset; cursor: pointer; color: var(--dim); width: 34px; height: 34px;
+      display: inline-grid; place-items: center; border-radius: var(--radius-pill); flex: none; }
     .vital-expand:hover { color: var(--accent); background: var(--accent-soft); }
-    .vital-o2toggle { all: unset; position: absolute; top: 10px; right: 44px; z-index: 2;
-      cursor: pointer; font-size: 11px; font-weight: 700; padding: 6px 10px;
-      border-radius: var(--radius-pill); color: var(--faint); border: 1px solid var(--surface-line);
-      line-height: 1; transition: color .35s ease, background-color .35s ease,
-      border-color .35s ease; }
+    .vital-o2toggle { all: unset; cursor: pointer; font-size: 13px; font-weight: 700;
+      padding: 7px 12px; border-radius: var(--radius-pill); color: var(--dim);
+      border: 1px solid var(--surface-line); line-height: 1; white-space: nowrap;
+      transition: color .35s ease, background-color .35s ease, border-color .35s ease; }
     .vital-o2toggle:hover { color: var(--accent); border-color: var(--accent); }
     .vital-o2toggle.on { color: var(--o2-on); background: color-mix(in srgb, var(--o2-on) 12%, transparent);
       border-color: color-mix(in srgb, var(--o2-on) 40%, transparent); }
     .vital-o2toggle.arming { color: var(--on-accent); background: var(--accent);
       border-color: var(--accent); }
-    .vital.placing { outline: 2px solid var(--accent); outline-offset: -1px; }
-    .place-hint { position: absolute; left: 50%; top: 44px; transform: translateX(-50%);
-      z-index: 3; background: var(--accent); color: var(--on-accent); font-size: 11px;
+    .place-hint { position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+      z-index: 3; background: var(--accent); color: var(--on-accent); font-size: 13px;
       font-weight: 600; padding: 5px 12px; border-radius: var(--radius-pill); white-space: nowrap;
       pointer-events: none; }
     .place-hint[hidden] { display: none; }
+
+    /* ---- movement: Peaceful - Wiggling meter ------------------------------- */
+    .move-card { grid-column: span 5; --c: var(--series-move); }
+    .meter { height: 12px; border-radius: var(--radius-pill); margin: 26px 0 12px;
+      position: relative; background: var(--today-meter); }
+    .meter i { position: absolute; top: -6px; width: 4px; height: 24px; margin-left: -2px;
+      border-radius: 2px; background: var(--accent); left: 0; transition: left .4s ease; }
+    .meter i[hidden] { display: none; }
+    .ends { display: flex; justify-content: space-between; font-weight: 700; font-size: 17px; }
+    .ends span:last-child { color: var(--dim); }
+    .move-card .plot { margin-top: 20px; height: 56px; background: none; border-radius: 0; }
+
+    /* ---- sleep summary ------------------------------------------------------ */
+    .sleep-card { grid-column: span 7; --c: var(--sleep-light); }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0 22px;
+      padding-bottom: 22px; border-bottom: 1px solid var(--surface-line); }
+    .pair .k { display: block; color: var(--dim); }
+    .pair .v { display: block; font-size: 26px; font-weight: 700; line-height: 1.2;
+      font-variant-numeric: tabular-nums; }
+    .pair-btn { all: unset; cursor: pointer; display: block;
+      border-radius: var(--today-box-radius); }
+    .pair-btn .more { display: block; color: var(--accent); font-size: 14px; font-weight: 600;
+      margin-top: 2px; }
+    .pair-btn:hover .more { text-decoration: underline; }
+    .sleep-card h3 { margin: 0; font-size: 18px; font-weight: 700; }
+    .sleep-card .plot { margin-top: 14px; height: 44px; border-radius: 8px; }
+    .sleep-card .plot.live::after { content: ''; position: absolute; top: 0; bottom: 0;
+      right: 0; width: 3px; background: var(--accent); }
+    .legend { display: flex; gap: 18px; margin-top: 12px; color: var(--dim); font-size: 14px;
+      flex-wrap: wrap; }
+    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+      margin-right: 7px; }
+    .legend .lg-light { background: var(--sleep-light); }
+    .legend .lg-deep { background: var(--sleep-deep); }
+    .legend .lg-awake { background: var(--awake); }
+
+    /* ---- last night's story (serif) ---------------------------------------- */
+    .story { grid-column: span 7; text-align: center; padding: 38px 32px; display: flex;
+      flex-direction: column; align-items: center; justify-content: center; }
+    .moon { width: 34px; height: 34px; border-radius: 50%;
+      box-shadow: inset -11px -3px 0 0 var(--star-bright); transform: rotate(-20deg);
+      margin-bottom: 18px; }
+    .story p { margin: 0; font: 400 30px/1.25 var(--font-serif); color: var(--ink); }
+    .story p b { color: var(--sleep-light); font-weight: 400; }
+    .story small { display: block; color: var(--dim); font: 16px var(--font-sans);
+      margin-top: 10px; }
+    .story a { margin-top: 20px; color: var(--accent); font-weight: 600; text-decoration: none; }
+    .story a:hover { text-decoration: underline; }
+
+    /* ---- sock status list --------------------------------------------------- */
+    .list { grid-column: span 5; padding: 24px 32px; }
+    .list h2 { text-align: center; font-size: 19px; }
+    .list .note { justify-content: center; font-size: 15px; margin-bottom: 10px; }
+    .list dl { margin: 0; }
+    .list .lrow { position: relative; display: flex; justify-content: space-between;
+      align-items: baseline; gap: 16px; padding: 11px 0;
+      border-top: 1px solid var(--surface-line); }
+    .list .lrow[hidden] { display: none; }
+    .list dt { color: var(--dim); }
+    .list dd { margin: 0; font-weight: 600; text-align: right;
+      font-variant-numeric: tabular-nums; }
+    .list dd small { display: block; font-size: 13px; font-weight: 400; color: var(--dim); }
+    .list dd.ok, .list dd .ok { color: var(--good); }
+    .list dd.warn, .list dd .warn { color: var(--warn); }
+    .list dd.info { color: var(--dim); }
+    .list dd.o2-on .val { color: var(--o2-on); }
+    /* a row that opens a detail sheet: the button's hit area covers the row */
+    .row-btn { all: unset; cursor: pointer; text-align: right; }
+    .row-btn::before { content: ''; position: absolute; inset: 0; }
+    .row-btn .chev { color: var(--accent); margin-left: 6px; }
+    .lrow:has(.row-btn:hover) dt { color: var(--ink); }
+    .row-btn:focus-visible { outline: none; }
+    .lrow:has(.row-btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px;
+      border-radius: 6px; }
+
+    /* ---- below the grid: tonight prep, raw data door ----------------------- */
+    #belowHero { display: contents; }
+    .prep { grid-column: span 7; }
+    .prep-top { display: flex; justify-content: space-between; align-items: baseline;
+      gap: 12px; margin-bottom: 12px; }
+    .prep-top span { font-size: 14px; color: var(--dim); white-space: nowrap;
+      font-variant-numeric: tabular-nums; }
+    .prep-facts { display: grid; gap: 6px; font-size: 15px; color: var(--dim); }
+    .prep-facts b { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .prep-note { font-size: 15px; color: var(--dim); line-height: 1.5; margin: 12px 0 0; }
+    .prep-feed-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent);
+      background: var(--accent-soft); border: 0; border-radius: var(--radius-pill); padding: 3px 11px;
+      margin-left: 8px; cursor: pointer; }
+    .prep-feed-btn:hover { filter: brightness(.96); }
+    .door { grid-column: span 12; display: flex; flex-direction: column; justify-content: center;
+      text-decoration: none; color: var(--ink); }
+    .prep + .door { grid-column: span 5; }
+    .door b { display: block; font-size: 19px; margin-bottom: 4px; }
+    .door span { font-size: 15px; color: var(--dim); line-height: 1.45; }
+    .door:hover b { color: var(--accent); }
+    .empty { text-align: center; color: var(--dim); padding: 80px 20px; font-size: 15px; }
+
+    @media (max-width: 860px) {
+      .hello { padding: 4px 2px 20px; }
+      .hello h1 { font-size: 30px; }
+      .hello p { font-size: 16px; }
+      .range-seg button, .range-seg .rs-custom { padding: 6px 12px; font-size: 13px; }
+      .tcard, .list { padding: 22px 20px; border-radius: 22px; }
+      .vitals { grid-template-columns: 1fr; gap: 28px; }
+      .move-card, .sleep-card, .story, .list, .prep, .prep + .door { grid-column: span 12; }
+      .big { font-size: 68px; }
+      .reading { min-height: 68px; }
+      .plot { height: 140px; }
+      .story p { font-size: 26px; }
+    }
+    @media (max-width: 420px) {
+      .grid { gap: 14px; }
+      .vital .label { margin-left: 0; }
+      .list .lrow { gap: 10px; }
+    }
 
     /* ---- metric detail sheet ---------------------------------------------- */
     .ms-top { display: flex; justify-content: space-between; align-items: baseline;
@@ -123,91 +293,34 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
     .ms-value { font-size: 28px; font-weight: 700; letter-spacing: -.02em;
       font-variant-numeric: tabular-nums; }
     .ms-value small { font-size: 14px; color: var(--dim); font-weight: 500; }
-    .ms-when { color: var(--dim); font-size: 12px; text-align: right; }
-    .ms-seg { display: flex; background: var(--accent-soft); border-radius: var(--radius-pill);
-      padding: 3px; margin-bottom: 12px; }
-    .ms-seg button { all: unset; flex: 1; text-align: center; cursor: pointer;
-      font-size: 12px; font-weight: 600; color: var(--dim); padding: 5px 0;
-      border-radius: var(--radius-pill); }
-    .ms-seg button.active { background: var(--surface); color: var(--accent);
-      box-shadow: var(--shadow-lift); }
+    .ms-when { color: var(--dim); font-size: 13px; text-align: right; }
+    .ms-seg { margin-bottom: 12px; }
+    .ms-seg button { flex: 1; text-align: center; padding: 6px 0; font-size: 13px; }
     .ms-chartwrap { position: relative; touch-action: pan-y; user-select: none;
       -webkit-user-select: none; cursor: crosshair; }
     .ms-chartwrap svg { display: block; width: 100%; height: 150px; }
-    .ms-chartwrap .threshold { stroke: var(--bad); opacity: .3; stroke-width: 1;
-      stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
     .ms-xline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--dim);
       opacity: .8; pointer-events: none; }
-    .ms-axis { display: flex; justify-content: space-between; color: var(--faint);
-      font-size: 10.5px; margin-top: 5px; font-variant-numeric: tabular-nums; }
-    .ms-ylab { position: absolute; right: 3px; font-size: 10px; color: var(--faint);
+    .ms-axis { display: flex; justify-content: space-between; color: var(--dim);
+      font-size: 12px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+    .ms-ylab { position: absolute; right: 3px; font-size: 11px; color: var(--dim);
       font-variant-numeric: tabular-nums; pointer-events: none; }
     .ms-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
       margin: 14px 0 4px; }
     .ms-stats div { text-align: center; }
-    .ms-stats b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
-    .ms-stats span { font-size: 10.5px; color: var(--faint); text-transform: uppercase;
+    .ms-stats b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+    .ms-stats span { font-size: 11px; color: var(--dim); text-transform: uppercase;
       letter-spacing: .08em; }
     .ms-dips { margin-top: 12px; display: grid; gap: 6px; }
     .ms-dips button { all: unset; box-sizing: border-box; cursor: pointer; display: flex;
-      justify-content: space-between; gap: 10px; padding: 8px 11px;
-      border: 1px solid var(--surface-line); border-radius: var(--radius-control);
-      font-size: 12.5px; font-variant-numeric: tabular-nums; }
+      justify-content: space-between; gap: 10px; padding: 9px 14px;
+      border: 1px solid var(--surface-line); border-radius: var(--today-box-radius);
+      font-size: 13.5px; font-variant-numeric: tabular-nums; }
     .ms-dips button:hover { border-color: var(--accent); }
     .ms-dips b { color: var(--warn); }
     .ms-dips b.deep { color: var(--bad); }
     .ms-link { display: block; margin-top: 14px; text-align: center; color: var(--accent);
-      text-decoration: none; font-size: 13px; font-weight: 600; }
-    .xline { position: absolute; top: 12px; bottom: 0; width: 1px;
-      background: var(--dim); opacity: .8; pointer-events: none; }
-    .xline::after { content: ''; position: absolute; top: -5px; left: -2.5px;
-      width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-    .timescale { display: flex; justify-content: space-between; align-items: center;
-      gap: 10px; font-size: 11px; color: var(--faint); margin: 0 4px 24px;
-      font-variant-numeric: tabular-nums; }
-    .timescale .live-chip { all: unset; font-size: 11px; color: var(--faint);
-      letter-spacing: .04em; }
-    .timescale .live-chip.paused { cursor: pointer; color: var(--accent);
-      background: var(--accent-soft); padding: 3px 11px; border-radius: var(--radius-pill);
-      font-weight: 700; }
-    .strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 12px; margin-bottom: 26px; }
-    .chip { padding: 15px 16px 13px; }
-    .chip b { display: block; font-size: 21px; letter-spacing: -0.01em;
-      font-variant-numeric: tabular-nums; }
-    .chip span { font-size: 11.5px; color: var(--dim); }
-    .chip .sub { display: block; font-size: 11px; color: var(--faint); margin-top: 3px; }
-    .chip.warn b { color: var(--warn); }
-    .chip.good b { color: var(--good); }
-    .chip.o2-on { border-color: color-mix(in srgb, var(--o2-on) 45%, transparent); }
-    .chip.o2-on b { color: var(--o2-on); }
-    /* on-O2 atmosphere: a wispy tint rising from the chart floor — oxygen
-       blue while on, grey while (logged) off, cross-fading at transitions */
-    /* Reset only the button chrome — `all: unset` would also wipe the .card
-       background/border/radius that these chips rely on. */
-    button.chip { display: block; width: 100%; margin: 0; font: inherit;
-      color: inherit; text-align: left; cursor: pointer; appearance: none; }
-    button.chip:hover { border-color: var(--accent); }
-    .doors { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 640px) { .doors { grid-template-columns: 1fr; } }
-    .door { display: block; padding: 18px 20px; text-decoration: none; color: var(--ink); }
-    .door b { display: block; font-size: 15px; margin-bottom: 3px; }
-    .door span { font-size: 13px; color: var(--dim); line-height: 1.45; }
-    .door:hover { border-color: var(--accent); }
-    .prep { padding: 16px 18px 14px; margin-bottom: 12px; }
-    .prep-top { display: flex; justify-content: space-between; align-items: baseline;
-      gap: 12px; margin-bottom: 10px; }
-    .prep-top b { font-size: 15px; }
-    .prep-top span { font-size: 12px; color: var(--faint); white-space: nowrap;
-      font-variant-numeric: tabular-nums; }
-    .prep-facts { display: grid; gap: 6px; font-size: 13px; color: var(--dim); }
-    .prep-facts b { color: var(--ink); font-variant-numeric: tabular-nums; }
-    .prep-note { font-size: 13px; color: var(--dim); line-height: 1.5; margin: 10px 0 0; }
-    .prep-feed-btn { font: inherit; font-size: 12px; font-weight: 600; color: var(--accent);
-      background: var(--accent-soft); border: 0; border-radius: var(--radius-pill); padding: 2px 10px;
-      margin-left: 6px; cursor: pointer; }
-    .prep-feed-btn:hover { filter: brightness(.96); }
-    .empty { text-align: center; color: var(--dim); padding: 80px 20px; font-size: 15px; }
+      text-decoration: none; font-size: 14px; font-weight: 600; }
 
     /* ---- detail sheet ---------------------------------------------------- */
     .sheet-backdrop { position: fixed; inset: 0; z-index: 80;
@@ -215,7 +328,7 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
       justify-content: center; padding: 20px; }
     .sheet-backdrop[hidden] { display: none; }
     .sheet { width: min(460px, 100%); max-height: min(72vh, 620px); overflow-y: auto;
-      padding: 20px 22px 22px; }
+      padding: 22px 24px 24px; background: var(--surface-solid); box-shadow: var(--shadow-pop); }
     @media (max-width: 640px) {
       .sheet-backdrop { align-items: flex-end; padding: 0; }
       .sheet { width: 100%; max-height: 80vh; border-radius: var(--radius-card) var(--radius-card) 0 0;
@@ -223,33 +336,36 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
     }
     .sheet header { display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 14px; }
-    .sheet header b { font-size: 16px; }
+    .sheet header b { font-size: 19px; }
     .sheet header button { all: unset; cursor: pointer; color: var(--dim);
       font-size: 15px; padding: 4px 8px; }
     .sheet header button:hover { color: var(--ink); }
     .sheet .row { display: flex; justify-content: space-between; gap: 12px;
-      padding: 9px 0; border-bottom: 1px solid var(--surface-line); font-size: 13.5px; }
+      padding: 9px 0; border-bottom: 1px solid var(--surface-line); font-size: 14px; }
     .sheet .row:last-child { border-bottom: 0; }
     .sheet .row b { font-variant-numeric: tabular-nums; }
     .sheet .row .mut { color: var(--dim); }
     .sheet .row a { color: var(--accent); text-decoration: none; font-weight: 600; }
-    .sheet .note { font-size: 12.5px; color: var(--dim); line-height: 1.5; margin: 10px 0 0; }
-    .sheet .ev-del { all: unset; cursor: pointer; color: var(--faint); padding: 0 4px; }
+    .sheet .row .dip-low { color: var(--warn); }
+    .sheet .row .dip-low.deep { color: var(--bad); }
+    .sheet .note { font-size: 13px; color: var(--dim); line-height: 1.5; margin: 10px 0 0; }
+    .sheet .ev-del { all: unset; cursor: pointer; color: var(--dim); padding: 0 4px; }
     .sheet .ev-del:hover { color: var(--bad); }
-    .sheet .row-del { all: unset; cursor: pointer; color: var(--faint); padding: 0 6px;
+    .sheet .row-del { all: unset; cursor: pointer; color: var(--dim); padding: 0 6px;
       font-size: 12px; flex: none; }
     .sheet .row-del:hover { color: var(--bad); }
     .sheet .row b:empty { display: none; }
     .feed-logrow { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
     .feed-logrow label { display: flex; align-items: center; gap: 7px; font-size: 13px;
       color: var(--dim); flex: none; }
-    .feed-logrow input[type="time"] { padding: 9px 10px; border: 1px solid var(--surface-line);
-      border-radius: var(--radius-control); background: var(--surface); color: var(--ink);
-      font-size: 13.5px; }
+    .feed-logrow input[type="time"] { padding: 9px 12px; border: 1px solid var(--surface-line);
+      border-radius: var(--today-box-radius); background: var(--surface-inset); color: var(--ink);
+      font: inherit; font-size: 14px; }
     .feed-logrow .o2-action { flex: 1; }
-    .feed-note { width: 100%; box-sizing: border-box; padding: 10px 12px;
-      border: 1px solid var(--surface-line); border-radius: var(--radius-control);
-      background: var(--surface); color: var(--ink); font-size: 13.5px; margin-bottom: 2px; }
+    .feed-note { width: 100%; box-sizing: border-box; padding: 10px 14px;
+      border: 1px solid var(--surface-line); border-radius: var(--today-box-radius);
+      background: var(--surface-inset); color: var(--ink); font: inherit; font-size: 14px;
+      margin-bottom: 2px; }
     .feed-amt-head { display: flex; justify-content: space-between; align-items: baseline;
       margin: 14px 0 6px; }
     .feed-amt-head .section-title { margin: 0; }
@@ -266,54 +382,96 @@ NOW_HEAD = """<link rel="manifest" href="/manifest.webmanifest" />
       background: linear-gradient(to right, var(--accent-soft), var(--accent)); }
     .feed-slider::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%;
       background: var(--surface); border: 2.5px solid var(--accent); }
-    .feed-slider-scale { display: flex; justify-content: space-between; font-size: 10px;
-      color: var(--faint); margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .feed-slider-scale { display: flex; justify-content: space-between; font-size: 11px;
+      color: var(--dim); margin-top: 2px; font-variant-numeric: tabular-nums; }
     .feed-strip { display: block; width: 100%; height: 30px; margin-top: 4px; }
     .fs-track { stroke: var(--surface-line); stroke-width: 1.5; }
     .fs-now { stroke: var(--faint); stroke-width: 1; stroke-dasharray: 2 3; }
     .fm-bottle { fill: var(--accent); opacity: .85; }
     .fm-nurse { fill: none; stroke: var(--accent); stroke-width: 2; }
-    .fm-solid { fill: var(--awake); opacity: .9; }
-    .feed-strip-axis { display: flex; justify-content: space-between; font-size: 9.5px;
-      color: var(--faint); font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+    .fm-solid { fill: var(--series-move); opacity: .9; }
+    .feed-strip-axis { display: flex; justify-content: space-between; font-size: 11px;
+      color: var(--dim); font-variant-numeric: tabular-nums; margin-bottom: 4px; }
     .o2-state { text-align: center; margin-bottom: 14px; }
     .o2-state b { display: block; font-size: 24px; letter-spacing: -.01em; }
-    .o2-state.on b { color: var(--accent); }
-    .o2-state span { font-size: 12.5px; color: var(--dim); }
+    .o2-state.on b { color: var(--o2-on); }
+    .o2-state span { font-size: 13px; color: var(--dim); }
     .flow-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
       margin-bottom: 12px; }
     .flow-presets button { all: unset; box-sizing: border-box; text-align: center; cursor: pointer;
-      padding: 10px 4px; border: 1px solid var(--surface-line); border-radius: var(--radius-control);
-      font-size: 13px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+      padding: 10px 4px; border: 1px solid var(--surface-line);
+      border-radius: var(--today-box-radius);
+      font-size: 14px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
     .flow-presets button:hover, .flow-presets button.sel { border-color: var(--accent);
       color: var(--accent); background: var(--accent-soft); }
     .o2-action { all: unset; box-sizing: border-box; display: block; width: 100%;
       text-align: center; cursor: pointer; padding: 12px 0;
       border-radius: var(--radius-control); background: var(--accent); color: var(--on-accent);
-      font-size: 14px; font-weight: 700; }
+      font-size: 15px; font-weight: 700; }
     .o2-action.stop { background: transparent; color: var(--bad);
       border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); }
     .o2-action[disabled] { opacity: .5; cursor: default; }
     .sheet .section-title { margin-top: 18px; }
-    @media (prefers-reduced-motion: reduce) { .chartzone svg g { transition: none !important; } }
+    @media (prefers-reduced-motion: reduce) {
+      .chartzone svg g { transition: none !important; }
+      .meter i, .vital-o2toggle { transition: none; }
+    }
   </style>"""
 
-_VITAL_CARD = """<div class="vital card{minor}" id="card-{key}" data-metric="{key}">
-        {extra}<button class="vital-expand" data-expand="{key}" type="button"
-          aria-label="Expand {label} chart" title="Bigger chart &amp; stats">⤢</button>
-        <span class="label">{label}</span>
-        <div class="value"><span id="{key}Value">—</span><small id="{key}Unit"> {unit}</small></div>
-        <div class="band" id="{key}Band"></div>
-        <div class="chartzone">
+_ICON_O2 = (
+    '<svg class="v-icon" viewBox="0 0 24 24" aria-hidden="true">'
+    '<circle cx="9" cy="11" r="5.5"/><circle cx="17.5" cy="15.5" r="3.5"/></svg>'
+)
+_ICON_HR = (
+    '<svg class="v-icon" viewBox="0 0 24 24" aria-hidden="true">'
+    '<path d="M2.5 12.5h4l2.2-6 4.3 11.5 2.4-5.500h6.100"/></svg>'
+)
+_ICON_EXPAND = (
+    '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">'
+    '<path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></svg>'
+)
+
+_EXPAND_BTN = (
+    '<button class="vital-expand" data-expand="{key}" type="button" '
+    'aria-label="Expand {label} chart" title="Bigger chart &amp; stats">' + _ICON_EXPAND + "</button>"
+)
+
+_PLOT = """<div class="plot chartzone" id="{key}Plot">
           <svg viewBox="0 0 100 42" preserveAspectRatio="none" aria-hidden="true"><g id="{key}G"></g></svg>
+          <div class="thlabels" id="{key}Th"></div>
           <div class="gaplabels" id="{key}Gaps"></div>
-          <div class="xline" id="{key}X" hidden></div>
+          <div class="xline" id="{key}X" hidden></div>{extra}
+        </div>"""
+
+_TICKS = '<div class="ticks"><span class="ts-start"></span><span class="ts-end"></span></div>'
+
+_VITAL = (
+    """<div class="vital {key}" id="card-{key}" data-metric="{key}">
+        <div class="reading">
+          {icon}
+          <div class="big"><span class="num" id="{key}Value">—</span><span class="unit" id="{key}Unit">{unit}</span></div>
+          <span class="tier" id="{key}Tier" hidden></span>
+          <span class="vital-tools">{tools}"""
+    + _EXPAND_BTN
+    + """</span>
         </div>
+        <div class="label"><span>{label}</span><span class="band" id="{key}Band"></span></div>
+        """
+    + _PLOT
+    + """
+        """
+    + _TICKS
+    + """
       </div>"""
+)
 
 NOW_BODY = (
-    """<div class="today-head">
-      <p class="status-line" id="statusLine">Checking in…</p>
+    """<div class="today">
+    <section class="hello" id="hello">
+      <div class="hello-text">
+        <h1 class="status-line" id="statusLine">Checking in…</h1>
+        <p id="statusDetail"></p>
+      </div>
       <div class="range-seg" id="rangeSeg" role="group" aria-label="Chart window">
         <button type="button" data-mins="60">1h</button>
         <button type="button" data-mins="180">3h</button>
@@ -322,29 +480,105 @@ NOW_BODY = (
         <button type="button" data-mins="1440">24h</button>
         <span class="rs-custom" id="rangeCustom" hidden>Custom</span>
       </div>
+    </section>
+    <div class="grid" id="todayGrid">
+      <section class="card tcard live-card" aria-labelledby="liveTitle">
+        <div class="card-head">
+          <div>
+            <h2 id="liveTitle">Live health readings</h2>
+            <div class="note" id="liveNote" role="status">Waiting for the first reading…</div>
+          </div>
+          <button class="live-chip" id="tsLive" type="button">● live</button>
+        </div>
+        <div class="vitals">
+      """
+    + _VITAL.format(
+        key="o2", label="Oxygen", unit="%", icon=_ICON_O2,
+        tools=(
+            '<button class="vital-o2toggle" id="o2ToggleBtn" type="button" '
+            'title="Log supplemental O₂ on/off at a point on the chart">O₂</button>'
+        ),
+        extra='<div class="place-hint" id="placeHint" hidden></div>',
+    )
+    + _VITAL.format(key="hr", label="Pulse rate", unit="BPM", icon=_ICON_HR, tools="", extra="")
+    + """
+        </div>
+      </section>
+
+      <section class="card tcard move-card" id="card-move" data-metric="move" aria-labelledby="moveTitle">
+        <div class="card-head">
+          <div>
+            <h2 id="moveTitle">Movement</h2>
+            <div class="note"><b id="moveValue">—</b><span class="band" id="moveBand"></span></div>
+          </div>
+          """
+    + _EXPAND_BTN.format(key="move", label="Movement")
+    + """
+        </div>
+        <div class="meter" id="moveMeter" role="img" aria-label="Movement level"><i id="moveMark" hidden></i></div>
+        <div class="ends" aria-hidden="true"><span>Peaceful</span><span>Wiggling</span></div>
+        """
+    + _PLOT.format(key="move", extra="")
+    + """
+      </section>
+
+      <section class="card tcard sleep-card" id="card-sleep" data-metric="sleep" aria-labelledby="sleepTitle">
+        <div class="card-head">
+          <div>
+            <h2 id="sleepTitle">Sleep summary</h2>
+            <div class="note"><b id="sleepValue">—</b><span class="band" id="sleepBand"></span></div>
+          </div>
+          """
+    + _EXPAND_BTN.format(key="sleep", label="Sleep")
+    + """
+        </div>
+        <div class="pair">
+          <button type="button" class="pair-btn" data-open="sleep" title="Sleep sessions and stages">
+            <span class="k">Time asleep today</span>
+            <span class="v" id="sleepToday">—</span>
+            <span class="more">Sessions ›</span>
+          </button>
+          <div><span class="k">Wakings today</span><span class="v" id="wakingsToday">—</span></div>
+        </div>
+        <h3>Sleep cycle</h3>
+        """
+    + _PLOT.format(key="sleep", extra="")
+    + """
+        """
+    + _TICKS
+    + """
+        <div class="legend">
+          <span><i class="lg-light"></i>Light</span>
+          <span><i class="lg-deep"></i>Deep</span>
+          <span><i class="lg-awake"></i>Awake</span>
+        </div>
+      </section>
+
+      <section class="card tcard story" id="storyCard" aria-label="Last night">
+        <div class="moon" aria-hidden="true"></div>
+        <p>Reading last night…</p>
+        <a href="/night">Last night's report →</a>
+      </section>
+
+      <section class="card tcard list" aria-labelledby="sockTitle">
+        <h2 id="sockTitle">Sock</h2>
+        <div class="note" id="sockSub">Checking…</div>
+        <dl id="sockRows"></dl>
+        <dl>
+          <div class="lrow" id="armedRow" hidden>
+            <dt>This PC's alerts</dt><dd id="armedValue" role="status"></dd>
+          </div>
+        </dl>
+      </section>
+
+      <div id="belowHero"></div>
     </div>
-    <div class="hero">"""
-    + _VITAL_CARD.format(minor="", key="o2", label="Oxygen", unit="%", extra=(
-        '<button class="vital-o2toggle" id="o2ToggleBtn" type="button" '
-        'title="Log supplemental O\u2082 on/off at a point on the chart">O\u2082</button>'
-        '<div class="place-hint" id="placeHint" hidden></div>'))
-    + _VITAL_CARD.format(minor="", key="hr", label="Heart rate", unit="bpm", extra="")
-    + """</div>
-    <div class="hero-minor">"""
-    + _VITAL_CARD.format(minor=" minor", key="sleep", label="Sleep", unit="", extra="")
-    + _VITAL_CARD.format(minor=" minor", key="move", label="Movement", unit="", extra="")
-    + """</div>
-    <div class="timescale">
-      <span id="tsStart"></span>
-      <button class="live-chip" id="tsLive" type="button">● live</button>
-      <span id="tsEnd"></span>
-    </div>
-    <div id="belowHero"></div>
     <div class="sheet-backdrop" id="sheetBackdrop" hidden>
       <div class="sheet card" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
         <header><b id="sheetTitle"></b><button id="sheetClose" type="button" aria-label="Close">✕</button></header>
         <div id="sheetBody"></div>
       </div>
+    </div>
     </div>"""
 )
 
@@ -381,16 +615,16 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
     const o2Zone = value => (value == null || value <= 0) ? 'var(--faint)'
       : value < O2.critical ? 'var(--bad)'
       : value < O2.warn ? 'var(--warn)'
-      : 'var(--accent)';
+      : 'var(--series-o2)';
     const moveWord = avg => avg < 4 ? 'calm' : avg < 20 ? 'stirring' : 'active';
 
     const METRICS = [
-      { key: 'o2',   label: 'Oxygen',     unit: '%',   fmt: v => Math.round(v), zone: o2Zone },
-      { key: 'hr',   label: 'Heart rate', unit: 'bpm', fmt: v => Math.round(v), zone: null },
-      { key: 'temp', label: 'Skin temp',  unit: '°C',  fmt: v => v.toFixed(1),  zone: null },
-      { key: 'move', label: 'Movement',   unit: '',    fmt: v => Math.round(v), zone: null },
+      { key: 'o2',   label: 'Oxygen',     unit: '%',   fmt: v => Math.round(v), zone: o2Zone, color: 'var(--series-o2)' },
+      { key: 'hr',   label: 'Pulse rate', unit: 'bpm', fmt: v => Math.round(v), zone: null, color: 'var(--series-hr)' },
+      { key: 'temp', label: 'Skin temp',  unit: '°C',  fmt: v => v.toFixed(1),  zone: null, color: 'var(--series-temp)' },
+      { key: 'move', label: 'Movement',   unit: '',    fmt: v => Math.round(v), zone: null, color: 'var(--series-move)' },
     ];
-    // Cards on the page: temp lives in the chip strip now; sleep is a hypnogram.
+    // Charts on the page: temp lives in the sock list; sleep is a stage band.
     const HERO_KEYS = ['o2', 'hr', 'sleep', 'move'];
     const SLEEP_WORD = { awake: 'awake', light: 'light', deep: 'deep' };
 
@@ -705,21 +939,28 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       const wantsO2 = key === 'o2' || key === 'hr';   // the vitals oxygen influences
       if (pts.length < 2) {
         const bare = wantsO2 ? o2OverlayMarkup(t0, t1, dataStart, dataEnd, w, h, !!opts.clip, overlayId, null) : '';
-        return { markup: bare + eventMarks, min: null, max: null, ghostYs: {} };
+        return { markup: bare + eventMarks, min: null, max: null, ghostYs: {}, thYs: [] };
       }
       let min = Infinity, max = -Infinity;
       for (const p of pts) { if (p.y < min) min = p.y; if (p.y > max) max = p.y; }
       // Anchor the O₂ domain near the 90% line so a dip to 85 reads as a real
       // plunge instead of vanishing into an auto-fit scale.
       if (key === 'o2') { min = Math.min(min, 91); max = Math.max(max, 99); }
+      // Thresholds are drawn on the trace (plan D1.9), so the scale always
+      // reaches down past the critical line, wherever the user set it.
+      if (key === 'o2' && opts.thresholds) min = Math.min(min, O2.critical - 1);
       const domainMin = min, domainMax = max;
       const padY = Math.max(0.5, (max - min) * 0.1); min -= padY; max += padY;
       const yOf = v => (h - 2) - ((v - min) / (max - min)) * (h - 6);
       let thresholds = '';
+      const thYs = [];
       if (key === 'o2' && opts.thresholds) {
-        thresholds = [O2.warn, O2.critical].filter(v => v > min && v < max)
-          .map(v => `<line class="threshold" x1="0" x2="${w}" y1="${yOf(v).toFixed(2)}" y2="${yOf(v).toFixed(2)}"/>`)
-          .join('');
+        // the hero pans over its margins, so its lines span the drawn data
+        const xa = opts.clip ? 0 : xOf(dataStart), xb = opts.clip ? w : xOf(dataEnd);
+        [[O2.warn, 'warn'], [O2.critical, 'crit']].filter(([v]) => v > min && v < max).forEach(([v, tier]) => {
+          thYs.push({ tier, value: v, y: yOf(v) / h });
+          thresholds += `<line class="threshold ${tier}" x1="${xa.toFixed(2)}" x2="${xb.toFixed(2)}" y1="${yOf(v).toFixed(2)}" y2="${yOf(v).toFixed(2)}"/>`;
+        });
       }
       // Hold the last reading's level through each offline stretch as a dashed
       // grey line, so the gap reads as "signal lost here" rather than nothing.
@@ -739,7 +980,8 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
           if (x1 - x0 < 0.5) return '';
           return `<line class="ghostline${gapWarn(g) ? ' warn' : ''}" x1="${x0.toFixed(2)}" x2="${x1.toFixed(2)}" y1="${gy.toFixed(2)}" y2="${gy.toFixed(2)}"/>`;
         }).join('');
-      const zone = (metric && metric.zone) || (() => 'var(--accent)');
+      const seriesColor = (metric && metric.color) || 'var(--accent)';
+      const zone = (metric && metric.zone) || (() => seriesColor);
       const segs = [];
       let run = { color: zone(pts[0].y), coords: [`${xOf(pts[0].x).toFixed(2)},${yOf(pts[0].y).toFixed(2)}`] };
       for (let i = 1; i < pts.length; i++) {
@@ -760,7 +1002,41 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       const o2Overlay = wantsO2
         ? o2OverlayMarkup(t0, t1, dataStart, dataEnd, w, h, !!opts.clip, overlayId, clipPoly)
         : '';
-      return { markup: o2Overlay + thresholds + ghosts + eventMarks + lines, min: domainMin, max: domainMax, ghostYs };
+      // Soft fill under the trace, in the vital's own colour (never the tier's).
+      let area = '';
+      if (opts.area) {
+        const runs = [];
+        let cur = [pts[0]];
+        for (let i = 1; i < pts.length; i++) {
+          if (pts[i].x - pts[i - 1].x > GAP_MS) { runs.push(cur); cur = []; }
+          cur.push(pts[i]);
+        }
+        runs.push(cur);
+        area = `<defs><linearGradient id="${overlayId}-area" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="0" y2="${h}">`
+          + `<stop offset="0" style="stop-color:${seriesColor};stop-opacity:.22"/>`
+          + `<stop offset="1" style="stop-color:${seriesColor};stop-opacity:0"/></linearGradient></defs>`
+          + runs.filter(r => r.length > 1).map(r =>
+            `<polygon fill="url(#${overlayId}-area)" points="${xOf(r[0].x).toFixed(2)},${h} `
+            + r.map(p => `${xOf(p.x).toFixed(2)},${yOf(p.y).toFixed(2)}`).join(' ')
+            + ` ${xOf(r[r.length - 1].x).toFixed(2)},${h}"/>`).join('');
+      }
+      // Movement reads as bars: the peak of each slice of the window. Slices
+      // are anchored to absolute time so they hold still while panning.
+      let marks = lines;
+      if (opts.bars) {
+        const binMs = (t1 - t0) / 96, top = Math.max(domainMax, 20), bins = new Map();
+        for (const p of points[key]) {
+          if (p.x < dataStart || p.x > dataEnd) continue;
+          const b = Math.floor(p.x / binMs);
+          if (!(bins.get(b) >= p.y)) bins.set(b, p.y);
+        }
+        const bw = (binMs / (t1 - t0)) * w;
+        marks = [...bins].map(([b, v]) => {
+          const bh = Math.max(1.5, Math.min(1, v / top) * (h - 3));
+          return `<rect class="movebar" x="${(xOf(b * binMs) + bw * 0.2).toFixed(2)}" width="${(bw * 0.6).toFixed(2)}" y="${(h - bh).toFixed(2)}" height="${bh.toFixed(2)}" opacity="${v > 8 ? 0.85 : 0.35}"/>`;
+        }).join('');
+      }
+      return { markup: area + o2Overlay + thresholds + ghosts + eventMarks + marks, min: domainMin, max: domainMax, ghostYs, thYs };
     }
 
     // Tracker-style hypnogram: rounded bars in three lanes (awake / light / deep).
@@ -772,6 +1048,26 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
         .map(e => `<line class="evline" x1="${xOf(e.x).toFixed(2)}" x2="${xOf(e.x).toFixed(2)}" y1="0" y2="${h}"><title>${esc(e.kind)}</title></line>`
           + `<circle class="evflag" cx="${xOf(e.x).toFixed(2)}" cy="3" r="2"/>`)
         .join('');
+      if (opts.band) {
+        // One band coloured by stage. A run is stretched to meet the next one
+        // when they are only a sample apart, so no slivers show between them.
+        const visible = sleepRuns.filter(r => r.end >= dataStart && r.start <= dataEnd);
+        const fills = visible.map((r, i) => {
+          const next = visible[i + 1];
+          const endT = next && next.start - r.end <= GAP_MS * 3 ? next.start : r.end;
+          const x0 = xOf(r.start), x1 = xOf(endT);
+          if (x1 - x0 < 0.05) return '';
+          return `<rect class="sleepfill sleep-${r.level}" x="${x0.toFixed(2)}" width="${(x1 - x0).toFixed(2)}" y="0" height="${h}"/>`;
+        }).join('');
+        const bandGhostYs = {};
+        const bandGhosts = gaps
+          .filter(g => g.end >= dataStart && g.start <= dataEnd && g.end - g.start > GAP_MS)
+          .map(g => {
+            bandGhostYs[g.start] = 0.86;
+            return `<line class="ghostline${gapWarn(g) ? ' warn' : ''}" x1="${xOf(g.start).toFixed(2)}" x2="${xOf(g.end).toFixed(2)}" y1="${(h * 0.86).toFixed(2)}" y2="${(h * 0.86).toFixed(2)}"/>`;
+          }).join('');
+        return { markup: fills + bandGhosts + eventMarks, ghostYs: bandGhostYs };
+      }
       const o2Overlay = '';
       const lanes = { awake: h * 0.2, light: h * 0.5, deep: h * 0.8 };
       // Gradients keyed to lane positions (userSpaceOnUse), so a connector
@@ -828,12 +1124,19 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       const g = el(key + 'G'); if (!g) return;
       const end = chartEnd();
       const built = key === 'sleep'
-        ? buildSleepMarkup(end - windowMs, end, end - 2 * windowMs, end + windowMs / 4, 100, 42)
-        : buildSeriesMarkup(key, end - windowMs, end, end - 2 * windowMs, end + windowMs / 4, 100, 42);
+        ? buildSleepMarkup(end - windowMs, end, end - 2 * windowMs, end + windowMs / 4, 100, 42, { band: true })
+        : buildSeriesMarkup(key, end - windowMs, end, end - 2 * windowMs, end + windowMs / 4, 100, 42,
+          { thresholds: key === 'o2', area: key !== 'move', bars: key === 'move' });
       g.innerHTML = built.markup;
       g.removeAttribute('transform');
       const labels = el(key + 'Gaps');
       if (labels) { labels.innerHTML = gapLabelSpans(end - windowMs, end, 0.16, built.ghostYs); labels.style.transform = ''; }
+      // Threshold captions say the tier in words; they stay put while panning.
+      const th = el(key + 'Th');
+      if (th) th.innerHTML = (built.thYs || []).map((t, i, all) => {
+        const under = t.y < 0.12 || (i > 0 && Math.abs(t.y - all[0].y) < 0.14);
+        return `<span class="${t.tier}${under ? ' under' : ''}" style="top:${(t.y * 100).toFixed(1)}%">${t.tier === 'warn' ? 'amber' : 'red'} below ${t.value}</span>`;
+      }).join('');
     }
     function renderCharts() {
       anchorEnd = chartEnd();
@@ -863,10 +1166,13 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
     };
     function updateTimescale() {
       const end = chartEnd();
-      el('tsStart').textContent = fmtTick(new Date(end - windowMs));
-      el('tsEnd').textContent = viewEnd == null ? 'now' : fmtTick(new Date(end));
+      const live = viewEnd == null;
+      const startText = fmtTick(new Date(end - windowMs)), endText = live ? 'now' : fmtTick(new Date(end));
+      document.querySelectorAll('.ts-start').forEach(node => { node.textContent = startText; });
+      document.querySelectorAll('.ts-end').forEach(node => { node.textContent = endText; node.classList.toggle('live', live); });
+      el('sleepPlot').classList.toggle('live', live);
       const chip = el('tsLive');
-      chip.textContent = viewEnd == null ? '● live' : '⟳ back to now';
+      chip.textContent = viewEnd != null ? '⟳ back to now' : tierState.stale ? '○ not live' : '● live';
       chip.classList.toggle('paused', viewEnd != null);
     }
     el('tsLive').addEventListener('click', () => {
@@ -875,12 +1181,13 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       viewEnd = null; clearInspect(); renderCharts();
     });
 
-    // ---- window picker (top right): sets the span all four charts show ----
+    // ---- window picker (pills, top right): sets the span all four charts show ----
     function paintRangeSeg() {
       let preset = false;
       el('rangeSeg').querySelectorAll('button').forEach(button => {
         const hit = Number(button.dataset.mins) * 60 * 1000 === windowMs;
         button.classList.toggle('active', hit);
+        button.setAttribute('aria-pressed', hit ? 'true' : 'false');
         preset = preset || hit;
       });
       el('rangeCustom').hidden = preset;
@@ -974,7 +1281,7 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
 
     function onDown(event, card) {
       if (event.button != null && event.button !== 0) return;
-      if (o2Placing && card.id === 'card-o2') {
+      if (o2Placing && card.id === 'o2Plot') {
         try { card.setPointerCapture(event.pointerId); } catch (error) { /* fine */ }
         gesture = { mode: 'place', card, pointerId: event.pointerId, hist: [] };
         inspectAt(event.clientX, card);
@@ -1118,7 +1425,7 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       momentumRaf = requestAnimationFrame(step);
     }
     HERO_KEYS.forEach(key => {
-      const card = el('card-' + key);
+      const card = el(key + 'Plot');   // the chart well takes the gestures
       card.addEventListener('pointerdown', e => onDown(e, card));
       card.addEventListener('pointermove', onMove);
       card.addEventListener('pointerup', onUp);
@@ -1236,18 +1543,18 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       const feedTotals = feedTotalsText(feeds);
       const feedLine = !FEEDS_ON ? ''
         : feeds.length
-          ? `<span><b>${feeds.length}</b> feed${feeds.length === 1 ? '' : 's'}${feedTotals ? ' · <b>' + feedTotals + '</b>' : ''}, last at ${fmtClock(new Date(feeds[feeds.length - 1].x))}<button class="prep-feed-btn" id="logFeedBtn">+ feed</button></span>`
-          : '<span>No feeds logged today.<button class="prep-feed-btn" id="logFeedBtn">+ feed</button></span>';
+          ? `<span><b>${feeds.length}</b> feed${feeds.length === 1 ? '' : 's'}${feedTotals ? ' · <b>' + feedTotals + '</b>' : ''}, last at ${fmtClock(new Date(feeds[feeds.length - 1].x))}<button type="button" class="prep-feed-btn" data-open="feeds">+ feed</button></span>`
+          : '<span>No feeds logged today.<button type="button" class="prep-feed-btn" data-open="feeds">+ feed</button></span>';
 
-      return `<div class="prep card">
-        <div class="prep-top"><b>Ready for tonight?</b><span>${nightNote}</span></div>
+      return `<section class="prep card tcard">
+        <div class="prep-top"><h2>Ready for tonight?</h2><span>${nightNote}</span></div>
         <div class="prep-facts">
           <span><b>${fmtDur(awakeDay)}</b> awake since ${fmtClock(dayStart)}</span>
           ${napLine}
           ${feedLine}
         </div>
         ${verdict ? `<p class="prep-note">${verdict}</p>` : ''}
-      </div>`;
+      </section>`;
     }
 
     // ---- feeds: first-class logging with amounts ----------------------------
@@ -1438,7 +1745,7 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
         `<div class="row">
           <span>${fmtClock(d.start)}</span>
           <span class="mut">${underText(d)}</span>
-          <b style="color:${d.min < O2.critical ? 'var(--bad)' : 'var(--warn)'}">low ${Math.round(d.min)}%</b>
+          <b class="dip-low${d.min < O2.critical ? ' deep' : ''}">low ${Math.round(d.min)}%</b>
           <a href="/data?focus=${encodeURIComponent(new Date(d.minAt.getTime() + 150000).toISOString())}&span=45&label=${encodeURIComponent('Dip to ' + Math.round(d.min) + '%')}">inspect →</a>
         </div>`).join('');
       openSheet('O₂ dips today', rows +
@@ -1471,11 +1778,11 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
         hint.hidden = !o2Placing;
         hint.textContent = `tap the moment O₂ went ${o2State.on ? 'off' : 'on'}`;
       }
-      el('card-o2').classList.toggle('placing', o2Placing);
+      el('o2Plot').classList.toggle('placing', o2Placing);
     }
     function exitO2Placing() { o2Placing = false; paintO2Toggle(); }
     function commitO2At(clientX) {
-      const card = el('card-o2');
+      const card = el('o2Plot');
       const rect = card.getBoundingClientRect();
       const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
       let t = chartEnd() - windowMs + frac * windowMs;
@@ -1792,7 +2099,38 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       ? `typical ${baselineState} range ${Math.round(band.low)}–${Math.round(band.high)}${unit}`
       : 'building her baseline — needs a couple of days';
 
+    // Icons are drawn for this project (plan D6): a warning triangle and a clock.
+    const ICON_WARN = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 2.500 20h19z"/><path d="M12 10v4.500M12 17.200v.300"/></svg>';
+    const ICON_CLOCK = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.500"/><path d="M12 7.500V12l3 2"/></svg>';
+    // Only touch the DOM when the markup changed: the page re-renders every
+    // poll, and rewriting unchanged nodes would drop focus and hover state.
+    function setHtml(node, html) {
+      if (node && node.__html !== html) { node.__html = html; node.innerHTML = html; }
+    }
+    // A reading older than this is "last known", not live (same 2 minutes the
+    // charts use to call a gap "collector off").
+    const STALE_MS = 2 * 60 * 1000;
+    const VITAL_STATES = ['critical', 'low', 'out', 'stale'];
+    function setVitalState(key, state) {
+      const classes = el('card-' + key).classList;
+      VITAL_STATES.forEach(name => classes.toggle(name, name === state));
+    }
+    // The badge beside the big number: the tier in words plus an icon, so the
+    // number's colour is never the only signal.
+    function setTier(key, kind, text) {
+      const node = el(key + 'Tier');
+      const sig = kind ? kind + '|' + text : '';
+      if (node.dataset.sig !== sig) {
+        node.dataset.sig = sig;
+        node.className = 'tier' + (kind === 'critical' ? ' critical' : '');
+        node.innerHTML = kind ? (kind === 'stale' ? ICON_CLOCK : ICON_WARN) + `<span>${esc(text)}</span>` : '';
+      }
+      node.hidden = !kind;
+    }
+    const agoText = ms => `${fmtDur(ms / 1000)} ago`;
+
     let sleepSessionText = 'watching for the first session';
+    let tierState = { o2: '', hr: '', stale: false };
     function updateHeroLive() {
       if (el('card-o2').classList.contains('inspecting')) return;
       el('o2Value').textContent = latest.o2 != null ? Math.round(latest.o2) : '—';
@@ -1802,20 +2140,85 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       el('o2Band').textContent = bandText(bands.o2, '%');
       el('hrBand').textContent = bandText(bands.hr, '');
       el('sleepBand').textContent = sleepSessionText;
-      el('moveBand').textContent = 'wiggle level — spikes while awake are normal';
+      el('moveBand').textContent = 'wiggle level · spikes while awake are normal';
+      // Peaceful - Wiggling meter: calm fills the first quarter, stirring the
+      // middle, active the rest (same cut-offs as the word beside the title).
+      const mark = el('moveMark');
+      mark.hidden = latest.move == null;
+      if (latest.move != null) {
+        const m = latest.move;
+        const frac = m < 4 ? (m / 4) * 0.25
+          : m < 20 ? 0.25 + ((m - 4) / 16) * 0.35
+          : 0.6 + Math.min(1, (m - 20) / 80) * 0.4;
+        mark.style.left = (Math.max(0.01, Math.min(0.99, frac)) * 100).toFixed(1) + '%';
+      }
+      el('moveMeter').setAttribute('aria-label', latest.move != null
+        ? `Movement level: ${moveWord(latest.move)}, on a scale from peaceful to wiggling`
+        : 'Movement level: no reading');
       // Compare against the ROUNDED bounds — the label prints "91–98%", so a
       // reading of 98 must count as inside even when the true band is 91.2–97.6.
       // Oxygen only warns on the LOW side: above the typical range is fine
       // (higher SpO₂ is good), so a high reading must never tint amber.
       const o2Out = bands.o2 && latest.o2 != null
         && Math.round(latest.o2) < Math.round(bands.o2.low);
-      const hrOut = bands.hr && latest.hr != null
-        && (Math.round(latest.hr) < Math.round(bands.hr.low) || Math.round(latest.hr) > Math.round(bands.hr.high));
-      el('card-o2').className = 'vital card' +
-        (latest.o2 != null && latest.o2 < O2.critical ? ' critical'
-          : latest.o2 != null && latest.o2 < O2.warn ? ' low'
-          : o2Out ? ' out' : '');
-      el('card-hr').className = 'vital card' + (hrOut ? ' out' : '');
+      const hrLow = bands.hr && latest.hr != null && Math.round(latest.hr) < Math.round(bands.hr.low);
+      const hrHigh = bands.hr && latest.hr != null && Math.round(latest.hr) > Math.round(bands.hr.high);
+      const stale = latest.ageMs != null && latest.ageMs > STALE_MS;
+      const o2Tier = latest.o2 == null ? ''
+        : latest.o2 < O2.critical ? 'critical'
+        : latest.o2 < O2.warn ? 'low'
+        : o2Out ? 'out' : '';
+      const hrTier = hrLow ? 'below' : hrHigh ? 'above' : '';
+      tierState = { o2: o2Tier, hr: hrTier, stale };
+      // Stale numbers go grey and say "last known"; a low tier keeps its colour.
+      setVitalState('o2', o2Tier || (stale && latest.o2 != null ? 'stale' : ''));
+      setVitalState('hr', hrTier ? 'out' : (stale && latest.hr != null ? 'stale' : ''));
+      const o2Word = { critical: 'Very low', low: 'Low', out: 'Below usual' }[o2Tier] || '';
+      const hrWord = hrTier ? (hrTier === 'above' ? 'Above usual' : 'Below usual') : '';
+      const known = stale ? `last known, ${agoText(latest.ageMs)}` : '';
+      const join = (word, tail) => word && tail ? `${word} · ${tail}` : (word || capitalized(tail));
+      setTier('o2', latest.o2 == null ? '' : o2Tier === 'critical' ? 'critical' : o2Tier ? 'warn' : stale ? 'stale' : '',
+        join(o2Word, known));
+      setTier('hr', latest.hr == null ? '' : hrTier ? 'warn' : stale ? 'stale' : '', join(hrWord, known));
+    }
+
+    // "Last night" follows the Tonight page's window: the most recent night
+    // stays current until the next one begins.
+    let rollupsLoaded = false;
+    function storyMarkup() {
+      const now = new Date();
+      const anchor = new Date(now);
+      if (now.getHours() * 60 + now.getMinutes() < NIGHT.start) anchor.setDate(anchor.getDate() - 1);
+      const start = new Date(anchor);
+      start.setHours(Math.floor(NIGHT.start / 60), NIGHT.start % 60, 0, 0);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      end.setHours(Math.floor(NIGHT.end / 60), NIGHT.end % 60, 0, 0);
+      const inProgress = now < end;
+      let sleep = 0, minO2 = null, dips = 0, inDip = false;
+      rollups.forEach(row => {
+        const t = new Date(row.bucket_start);
+        if (t < start || t >= end) return;
+        sleep += row.sleep_seconds || 0;
+        if (row.min_oxygen_saturation != null && (minO2 === null || row.min_oxygen_saturation < minO2)) minO2 = row.min_oxygen_saturation;
+        const low = row.min_oxygen_saturation != null && row.min_oxygen_saturation < O2.warn;
+        if (low && !inDip) dips += 1;
+        inDip = low;
+      });
+      const wakes = I.wakeUps(rollups, start, end).length;
+      const moon = '<div class="moon" aria-hidden="true"></div>';
+      const link = `<a href="/night">${inProgress ? "Tonight's report" : "Last night's report"} →</a>`;
+      if (!rollupsLoaded) return `${moon}<p>Reading last night…</p>${link}`;
+      if (!sleep && minO2 === null) {
+        return moon + (inProgress
+          ? `<p>Tonight's story starts with the first sleep</p><small>Night began ${fmtClock(start)}.</small>`
+          : `<p>Nothing recorded last night</p><small>No sock readings between ${fmtClock(start)} and ${fmtClock(end)}.</small>`) + link;
+      }
+      const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+      return moon
+        + (inProgress ? `<p>Asleep <b>${fmtDur(sleep)}</b> so far tonight</p>` : `<p>Slept <b>${fmtDur(sleep)}</b> last night</p>`)
+        + `<small>${plural(wakes, 'wake-up')} · ${plural(dips, 'oxygen dip')}${minO2 !== null ? ` · lowest ${Math.round(minO2)}%` : ''}</small>`
+        + link;
     }
 
     function render(widget) {
@@ -1860,6 +2263,8 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
         ? recent.reduce((a, r) => a + (r.movement || 0), 0) / recent.length
         : null;
       latest.offline = offline;
+      latest.at = latestRow ? Date.parse(latestRow.recorded_at) : null;
+      latest.ageMs = latest.at != null ? Date.now() - latest.at : null;
       const temps = rollups.map(r => r.avg_skin_temperature).filter(v => v != null);
       tempRangeText = temps.length
         ? `${Math.min(...temps).toFixed(1)}–${Math.max(...temps).toFixed(1)}° over recent days`
@@ -1897,10 +2302,33 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
         } else if (bed) bedtimeLine = ` Fell asleep ${fmtClock(bed)}.`;
       }
 
-      // --- status sentence ---------------------------------------------------
-      let status;
-      if (offline) {
-        status = `<b>${capitalized(deviceName)}</b>'s sock isn't reporting right now — it may be off or charging.`;
+      // --- status sentence: plain language first; alert states lead ----------
+      const name = esc(capitalized(deviceName));
+      const stale = tierState.stale;
+      const sockGap = gaps.filter(g => g.kind === 'sock').pop();
+      const sockLabel = offline ? (sockGap ? sockGap.label : 'sock off') : '';
+      const shortState = liveRun ? (liveRun.asleep ? 'is asleep' : 'is awake')
+        : currentRun && currentRun.state === 'asleep' ? 'is asleep'
+        : latest.sleepLevel === 'light' || latest.sleepLevel === 'deep' ? 'is asleep'
+        : 'is awake';
+      let headline, detail, mood = '';
+      if (!latestRow) {
+        const seen = widget && widget.updated_at ? new Date(widget.updated_at) : null;
+        headline = 'No readings in the last hour.';
+        mood = 'is-stale';
+        detail = (seen ? `The last reading arrived <b>${fmtTick(seen)}</b>. ` : '')
+          + 'The collector may be stopped, or the sock may be off or charging.';
+      } else if (stale) {
+        headline = `No new readings for ${fmtDur(latest.ageMs / 1000)}.`;
+        mood = 'is-stale';
+        detail = `The numbers below are the last known values, from <b>${fmtClock(new Date(latest.at))}</b>. Check that the collector is running.`;
+      } else if (offline) {
+        headline = sockLabel === 'charging' ? `${name}'s sock is charging.`
+          : sockLabel === 'disconnected' ? `${name}'s sock has lost its signal.`
+          : `${name}'s sock isn't reporting.`;
+        detail = sockLabel === 'charging' ? 'No readings arrive while it charges.'
+          : sockLabel === 'disconnected' ? 'The sock is not connected, so no readings are arriving.'
+          : 'It may be off, or not on properly.';
       } else {
         const sessionText = liveRun
           ? `${liveRun.asleep ? 'asleep' : 'awake'} for <b>${fmtDur((Date.now() - liveRun.start) / 1000)}</b>`
@@ -1909,54 +2337,182 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
             : 'settling in';
         const nth = sleepRunsToday ? ` — sleep #${sleepRunsToday} today` : '';
         const o2Note = o2State.on ? ` On <b>${o2State.flow ? esc(o2State.flow) + ' ' : ''}O₂</b>.` : '';
-        status = `<b>${capitalized(deviceName)}</b> is ${stateText || 'doing fine'}, ${sessionText}${nth}.${o2Note}${bedtimeLine}`;
+        const lead = stateText && stateText !== 'awake' ? capitalized(stateText) + ', ' : '';
+        const line = `${lead}${lead ? sessionText : capitalized(sessionText)}${nth}.${o2Note}${bedtimeLine}`;
+        if (tierState.o2 === 'critical') {
+          headline = 'Oxygen is very low right now.';
+          mood = 'is-critical';
+          detail = `<b>${Math.round(latest.o2)}%</b>, below your red threshold of ${O2.critical}%. ${name} ${shortState}. ${line}`;
+        } else if (tierState.o2 === 'low') {
+          headline = 'Oxygen is low right now.';
+          mood = 'is-low';
+          detail = `<b>${Math.round(latest.o2)}%</b>, below your amber threshold of ${O2.warn}%. ${name} ${shortState}. ${line}`;
+        } else {
+          headline = `${capitalized(deviceName)} ${shortState}.`;
+          detail = line;
+        }
       }
-      const shortState = offline ? "isn't reporting"
-        : liveRun ? (liveRun.asleep ? 'is asleep' : 'is awake')
-        : currentRun && currentRun.state === 'asleep' ? 'is asleep'
-        : latest.sleepLevel === 'light' || latest.sleepLevel === 'deep' ? 'is asleep'
-        : 'is awake';
-      el('statusLine').innerHTML = `<span class="st-full">${status}</span>`
-        + `<span class="st-short"><b>${capitalized(deviceName)}</b> ${shortState}${o2State.on ? ' · O₂' : ''}</span>`;
+      if (el('statusLine').textContent !== headline) el('statusLine').textContent = headline;
+      setHtml(el('statusDetail'), detail);
+      el('hello').className = 'hello' + (mood ? ' ' + mood : '');
 
-      el('belowHero').innerHTML = `
-        <div class="strip">
-          <button class="chip card" id="chipSleep"><b>${fmtDur(sleepToday)}</b><span>sleep today</span><span class="sub">tap for sessions</span></button>
-          <button class="chip card ${dipsToday ? 'warn' : 'good'}" id="chipDips"><b>${dipsToday}</b><span>O₂ dips today</span><span class="sub">tap for detail</span></button>
-          <button class="chip card" id="chipTemp"><b>${latest.temp != null ? latest.temp.toFixed(1) + '°' : '—'}</b><span>skin temp</span><span class="sub">${tempRangeText || 'tap for history'}</span></button>
-          <button class="chip card ${o2State.on ? 'o2-on' : ''}" id="chipO2">
-            <b>${o2State.on ? 'O₂ on' : 'O₂ off'}</b>
-            <span>${o2State.on && o2State.flow ? esc(o2State.flow) : 'supplemental oxygen'}</span>
-            <span class="sub">${o2State.since
-              ? `since ${fmtClock(new Date(o2State.since))} · ${fmtDur((Date.now() - o2State.since) / 1000)}`
-              : 'tap to log on/off'}</span></button>
-          ${(() => {
-            if (!FEEDS_ON) return '';
-            const feedsToday = feedsSince(today.start.getTime());
-            const totals = feedTotalsText(feedsToday);
-            const lastFeed = feedsToday.length ? feedsToday[feedsToday.length - 1] : null;
-            return `<button class="chip card" id="chipFeeds">
-              <b>${feedsToday.length}</b><span>feed${feedsToday.length === 1 ? '' : 's'} today</span>
-              <span class="sub">${lastFeed
-                ? `${totals ? totals + ' · ' : ''}last ${fmtDur((Date.now() - lastFeed.x) / 1000)} ago`
-                : 'tap to log'}</span></button>`;
-          })()}
-        </div>
-        ${prepCardMarkup()}
-        <div class="doors">
-          <a class="door card" href="/night"><b>Last night's report →</b>
-            <span>Sleep story, wake-ups, and every oxygen event, in plain language.</span></a>
-          <a class="door card" href="/data"><b>The raw data →</b>
-            <span>Full charts, tables, exports — every reading behind these numbers.</span></a>
-        </div>`;
-      el('chipSleep').addEventListener('click', openSleepSheet);
-      el('chipTemp').addEventListener('click', () => openMetricSheet('temp'));
-      el('chipDips').addEventListener('click', dipsSheet);
-      el('chipO2').addEventListener('click', o2Sheet);
-      if (el('chipFeeds')) el('chipFeeds').addEventListener('click', feedSheet);
-      if (el('logFeedBtn')) el('logFeedBtn').addEventListener('click', feedSheet);
+      // --- the note under "Live health readings" ----------------------------
+      let note, noteTone = '';
+      if (!latestRow) { note = ICON_CLOCK + 'No readings in the last hour'; noteTone = 'warn'; }
+      else if (stale) {
+        note = ICON_CLOCK + `No new readings for ${fmtDur(latest.ageMs / 1000)} · showing the last known values`;
+        noteTone = 'warn';
+      } else if (offline) {
+        if (sockLabel === 'charging') note = 'Sock charging · not monitoring';
+        else {
+          note = ICON_WARN + (sockLabel === 'disconnected' ? 'Sock signal lost · no readings' : 'Sock off · no readings');
+          noteTone = 'warn';
+        }
+      } else if (tierState.o2 === 'critical') {
+        note = ICON_WARN + `Oxygen is below your red threshold (${O2.critical}%)`; noteTone = 'bad';
+      } else if (tierState.o2 === 'low') {
+        note = ICON_WARN + `Oxygen is below your amber threshold (${O2.warn}%)`; noteTone = 'warn';
+      } else if (tierState.o2 === 'out') {
+        note = ICON_WARN + `Oxygen is below the usual ${baselineState} range`; noteTone = 'warn';
+      } else if (tierState.hr) {
+        note = ICON_WARN + `Pulse is ${tierState.hr} the usual ${baselineState} range`; noteTone = 'warn';
+      } else {
+        note = bands.o2 || bands.hr ? 'All readings are in the usual range' : 'Oxygen is above your alert thresholds';
+      }
+      updateTimescale();   // the live chip must not say "live" over stale numbers
+      setHtml(el('liveNote'), note);
+      el('liveNote').className = 'note' + (noteTone ? ' ' + noteTone : '');
+
+      // --- sleep summary + last night's story ---------------------------------
+      el('sleepToday').textContent = rollupsLoaded ? fmtDur(sleepToday) : '—';
+      el('wakingsToday').textContent = rollupsLoaded ? I.wakeUps(rollups, today.start, today.end).length : '—';
+      setHtml(el('storyCard'), storyMarkup());
+
+      // --- sock status list ----------------------------------------------------
+      let sockSub, sockTone = '';
+      if (!latestRow) { sockSub = ICON_CLOCK + 'No recent readings'; sockTone = 'warn'; }
+      else if (stale) { sockSub = ICON_CLOCK + `No new data for ${fmtDur(latest.ageMs / 1000)}`; sockTone = 'warn'; }
+      else if (offline) {
+        if (sockLabel === 'charging') sockSub = 'Charging · not monitoring';
+        else { sockSub = ICON_WARN + (sockLabel === 'disconnected' ? 'Signal lost' : 'Sock off'); sockTone = 'warn'; }
+      } else sockSub = 'Receiving readings';
+      setHtml(el('sockSub'), sockSub);
+      el('sockSub').className = 'note' + (sockTone ? ' ' + sockTone : '');
+
+      const rowBtn = (open, term, text, inner) =>
+        `<button type="button" class="row-btn" data-open="${open}" aria-label="${esc(term)}: ${esc(text)}. Open details">${inner}<span class="chev" aria-hidden="true">›</span></button>`;
+      const row = (term, dd, cls) => `<div class="lrow"><dt>${term}</dt><dd${cls ? ` class="${cls}"` : ''}>${dd}</dd></div>`;
+      const battery = widget && typeof widget.battery === 'number' ? Math.round(widget.battery) + '%' : '—';
+      const battMins = widget && typeof widget.battery_minutes === 'number' ? widget.battery_minutes : 0;
+      const batteryTail = widget && widget.charging ? ' · charging'
+        : battMins >= 90 ? ` · about ${Math.round(battMins / 60)}h`
+        : battMins > 0 ? ` · about ${Math.round(battMins)}m` : '';
+      const tempText = latest.temp != null ? latest.temp.toFixed(1) + '°' : '—';
+      const o2Text = o2State.on
+        ? `${o2State.flow ? esc(o2State.flow) : 'On'} since ${fmtClock(new Date(o2State.since))}`
+        : 'Off';
+      const o2Sub = o2State.on ? `on for ${fmtDur((Date.now() - o2State.since) / 1000)}`
+        : o2State.since ? `since ${fmtClock(new Date(o2State.since))}` : 'nothing logged yet';
+      let feedRow = '';
+      if (FEEDS_ON) {
+        const feedsToday = feedsSince(today.start.getTime());
+        const totals = feedTotalsText(feedsToday);
+        const lastFeed = feedsToday.length ? feedsToday[feedsToday.length - 1] : null;
+        const feedSub = lastFeed
+          ? `${totals ? totals + ' · ' : ''}last ${fmtDur((Date.now() - lastFeed.x) / 1000)} ago`
+          : 'log a feed';
+        feedRow = row('Feeds today', rowBtn('feeds', 'Feeds today', String(feedsToday.length),
+          `<span class="val">${feedsToday.length}</span>`) + `<small>${feedSub}</small>`);
+      }
+      setHtml(el('sockRows'),
+        row('Sock battery', battery + batteryTail)
+        + row('Skin temperature', rowBtn('temp', 'Skin temperature', tempText, `<span class="val">${tempText}</span>`)
+          + (tempRangeText ? `<small>${tempRangeText}</small>` : ''))
+        + row('Supplemental O₂', rowBtn('o2', 'Supplemental oxygen', o2Text, `<span class="val">${o2Text}</span>`)
+          + `<small>${o2Sub}</small>`, o2State.on ? 'o2-on' : '')
+        + row('O₂ dips today', rowBtn('dips', 'Oxygen dips today', String(dipsToday),
+          `<span class="val${dipsToday ? ' warn' : ''}">${dipsToday}</span>`)
+          + (dipsToday ? `<small>below ${O2.warn}%</small>` : ''))
+        + feedRow);
+
+      // --- below the grid: tonight prep (daytime only) and the Data door -------
+      setHtml(el('belowHero'), `${prepCardMarkup()}
+        <a class="door card tcard" href="/data"><b>The raw data →</b>
+          <span>Full charts, tables, exports: every reading behind these numbers.</span></a>`);
     }
 
+    // One listener for everything that opens a detail sheet (rows, sessions, + feed).
+    const OPENERS = {
+      sleep: () => openSleepSheet(), temp: () => openMetricSheet('temp'),
+      dips: () => dipsSheet(), o2: () => o2Sheet(), feeds: () => feedSheet(),
+    };
+    el('todayGrid').addEventListener('click', event => {
+      const target = event.target.closest('[data-open]');
+      if (target && OPENERS[target.dataset.open]) OPENERS[target.dataset.open]();
+    });
+
+    // ---- "This PC's alerts" row: desktop app only ----------------------------
+    // Same detection, command and rules as the shell's armed chip (shell.py):
+    // Tauri command `armed_state` -> { armed, problems: [{ code, text }] },
+    // polled every 5 s. It reports on THIS PC's alert path, never on the baby.
+    // Hidden in a browser (no bridge) and until the command has answered once;
+    // after that a shell that goes quiet shows "unknown" rather than a stale
+    // "Armed". Words always carry the state; colour only repeats it.
+    (function () {
+      const bridge = window.__TAURI__;
+      const invoke = (bridge && bridge.core && typeof bridge.core.invoke === 'function') ? bridge.core.invoke : null;
+      if (!invoke) return;
+      const POLL_MS = 5000, QUIET_MS = 15000;
+      const rowNode = el('armedRow'), valueNode = el('armedValue');
+      let everOk = false, lastOkAt = 0, pendingSince = 0;
+      function show(kind, text, title) {
+        rowNode.hidden = false;
+        if (valueNode.textContent !== text) valueNode.textContent = text;   // unchanged: don't re-announce
+        valueNode.className = kind;
+        rowNode.title = title;
+      }
+      function paint(state) {
+        if (!state || typeof state.armed !== 'boolean') return false;
+        const problems = (Array.isArray(state.problems) ? state.problems : [])
+          .filter(p => p && typeof p.text === 'string' && p.text);
+        // not_collecting (sock off, no account linked, remote server) is "not
+        // monitoring", not a fault. Anything else is a fault and wins.
+        const faults = problems.filter(p => p.code !== 'not_collecting');
+        const all = problems.map(p => p.text).join(' · ');
+        if (faults.length || (!state.armed && !problems.length)) {
+          show('warn', faults.length ? faults[0].text : 'Not armed',
+            'This PC may not sound an alert' + (all ? ': ' + all : '.'));
+        } else if (problems.length) {
+          show('info', 'Not monitoring · ' + problems[0].text, 'Not monitoring on this PC: ' + all);
+        } else {
+          show('ok', 'Armed', "This PC's alert path is working. It says nothing about your baby, "
+            + 'only that this PC can raise an alert.');
+        }
+        return true;
+      }
+      function settle(ok) {
+        pendingSince = 0;
+        if (ok) { everOk = true; lastOkAt = Date.now(); }
+        else if (!everOk) rowNode.hidden = true;
+      }
+      function tick() {
+        const now = Date.now();
+        if (everOk && now - lastOkAt > QUIET_MS) {
+          show('warn', 'Alert status unknown',
+            'The desktop app has stopped reporting whether this PC can sound an alert.');
+        }
+        if (pendingSince && now - pendingSince < QUIET_MS) return;   // still waiting
+        pendingSince = now;
+        let call;
+        try { call = Promise.resolve(invoke('armed_state')); }
+        catch (error) { call = Promise.reject(error); }
+        call.then(state => settle(paint(state)), () => settle(false));
+      }
+      tick();
+      setInterval(tick, POLL_MS);
+    })();
+
+    let lastWidget = null;
     async function refresh() {
       try {
         const [readings, widget] = await Promise.all([
@@ -1964,11 +2520,20 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
           fetch('/api/widget?hours=24').then(r => r.json())
         ]);
         liveReadings = readings;
+        lastWidget = widget;
         rebuildPoints();
         render(widget);
         // a panned window stays frozen; live windows track the newest data
         if (!gesture && !momentumRaf && viewEnd == null) renderCharts();
-      } catch (error) { /* keep last render */ }
+      } catch (error) {
+        // The fetch failed. Keep the last readings, but re-judge them against
+        // the clock so old numbers turn into "last known" instead of looking live.
+        try {
+          rebuildPoints();
+          render(lastWidget);
+          if (!gesture && !momentumRaf && viewEnd == null) renderCharts();
+        } catch (inner) { /* keep last render */ }
+      }
     }
 
     async function boot() {
@@ -1976,7 +2541,7 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       // render live vitals immediately and fold history in when it arrives.
       const rollupsReady = fetch('/api/rollups?bucket=5m&hours=192&limit=100000')
         .then(r => r.json())
-        .then(data => { rollups = data.rollups || []; })
+        .then(data => { rollups = data.rollups || []; rollupsLoaded = true; })
         .catch(() => {});
       loadEvents();
       try {
@@ -1997,6 +2562,10 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
         if (account && account.poll_interval_seconds) pollSeconds = account.poll_interval_seconds;
       } catch (error) {
         el('statusLine').textContent = 'Could not load readings — is the collector running?';
+        el('hello').className = 'hello is-stale';
+        el('liveNote').innerHTML = ICON_WARN + 'Could not load readings';
+        el('liveNote').className = 'note warn';
+        el('sockSub').textContent = 'Unknown';
         return;
       }
       await refresh();
@@ -2019,7 +2588,7 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
         const feedsWere = FEEDS_ON;
         FEEDS_ON = prefs.feed_tracking !== false;
         rebuildPoints();
-        updateHeroLive();       // retint the vitals against the new O₂ tiers at once
+        render(lastWidget);     // retint the vitals against the new O₂ tiers at once
         if (!gesture) renderCharts();
         if (feedsWere !== FEEDS_ON) refresh();   // add/remove the feeds chip now
       });
