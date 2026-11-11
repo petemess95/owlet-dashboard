@@ -43,7 +43,7 @@ All are my judgment unless marked. Section 13 lists the ones that need your answ
 | Keep-awake | The PC is kept from sleeping while a poller is running. The display may still turn off. |
 | Armed state | Computed by the shell, since only the shell knows about audio and sleep. Shown on the widget, tray and dashboard top bar. |
 | Hotkeys | Off until the user sets them, to avoid clashing with game bindings. |
-| Controller snooze | **Asked for by you.** A game controller can snooze an alert. Two modes in settings: a chosen button or combination, or any button. Details and the safety guard for "any button" are in section 5. |
+| Controller snooze | **Asked for by you.** A game controller can snooze an alert. One mode in settings: a chosen button or combination ("any button" was dropped in part 2, your decision). Details and the 2-second guard are in section 5. |
 | Acknowledge timing | **Confirmed by you.** Silent until recovery plus 3 minutes, capped at 10 minutes. |
 | Phone push | **Decided by you.** Not in v0.2. |
 | Redesign | **Decided by you.** A night-sky theme with the feel of the Owlet phone app: deep navy, soft rounded cards, mint accent. Same mood, none of their logo or artwork. Dark is the default; a light theme is kept (your decision) and re-coloured to match. |
@@ -119,17 +119,18 @@ Snooze an alert from the controller already in your hands, without reaching for 
 | Mode | Behaviour |
 |---|---|
 | Off | Controller input is ignored. The default until you choose a mode. |
-| Chosen button | One button or a combination (for example both stick clicks, or View + Menu), captured with a "press a button" field. Recommended. |
-| Any button | Any face button, shoulder button, trigger, stick click, D-pad or menu button snoozes. Stick movement does not count. |
+| Chosen button | One button or a combination (for example both stick clicks, or View + Menu), captured with a "press a button" field. |
 
-**Rules for both modes**
+"Any button" mode was removed in part 2 (your decision): only a designated button or combination snoozes.
+
+**Rules**
 - Controller input only does anything while an amber or red alert is showing. At all other times the app doesn't read the controller.
 - It triggers the normal snooze (length from section 6, default 15 s), through the same `do_snooze` path as the hotkey and tray. It never acknowledges: the longer "I'm checking" silence (F) needs the keyboard hotkey, the overlay button or the tray.
 - A press counts on button-down. A button already held when the alert appears doesn't count until it is released and pressed again.
 - The game also receives the press. The app can't hide it from the game.
 
-**Guard for "any button"**
-While playing, you press buttons constantly, so "any button" would silence an alert before you noticed it. To prevent that:
+**2-second guard** (applies to the chosen button, your decision in part 2)
+While playing, you press buttons constantly. To keep a reflex press from silencing an alert before you noticed it:
 - Presses are ignored for the first 2 seconds of each alert appearance, so the flash and sound always get at least that long.
 - The same 2 seconds apply every time the alert returns after a snooze. During active play, an unresolved alert therefore cycles roughly 2 s on, 15 s off, and gameplay can't silence it for good.
 - Escalation from amber to red restarts the 2 seconds.
@@ -147,8 +148,8 @@ The 2-second figure is your choice. It is a constant that is easy to change afte
 **Acceptance criteria**
 - With a borderless-fullscreen game focused, the snooze hotkey silences a red test alert and the game keeps focus.
 - A clashing keyboard combination is rejected with a visible message.
-- Chosen-button mode: the chosen button snoozes a test alert while a game has focus; other buttons do nothing.
-- Any-button mode: a press in the first 2 seconds of an alert does nothing; a press after that snoozes; the alert returns after the snooze and again ignores presses for 2 seconds.
+- The chosen button snoozes a test alert while a game has focus; other buttons do nothing.
+- A press of the chosen button in the first 2 seconds of an alert does nothing; a press after that snoozes; the alert returns after the snooze and again ignores presses for 2 seconds.
 - A button held from before the alert doesn't snooze it.
 - With no alert showing, controller input has no effect and XInput is not polled.
 - With no controller connected, nothing errors and alerts behave as before.
@@ -168,7 +169,7 @@ A new "Alerts" section in the existing settings, plus a desktop-only block.
 | Unmute and raise volume on red (switch) | on | desktop config |
 | Alarm volume level (slider, 20–100%, enabled when the switch is on) | 60% | desktop config |
 | Hotkeys | unbound | desktop config |
-| Controller snooze: off / chosen button / any button | off | desktop config |
+| Controller snooze: off / chosen button | off | desktop config |
 | Start at login, keep PC awake | off, on | desktop config |
 | Test amber / test red buttons | — | — |
 
@@ -357,7 +358,7 @@ This table is the outline. [orchestration-v0.2.md](orchestration-v0.2.md) breaks
 - **This is still not a medical alarm.** It depends on Owlet's cloud, the internet connection and this PC. The base station stays the primary alarm. The armed indicator must never suggest otherwise: it means "this PC's alert path is working", and the settings page should say so.
 - **Changing system volume is intrusive.** Unmute-on-red will startle someone on a call. It's the right default for a safety alert, it's restorable, and it can be turned off.
 - **WASAPI is more code than `PlaySoundW`** and the place a silent failure would hurt most. Keep the fallback and surface failures in the armed state.
-- **Controller snooze makes silencing easier.** That is its purpose and also its risk. The 2-second guard, the 15-second limit and the no-acknowledge rule keep gameplay from hiding an alert. Chosen-button mode is the safer choice.
+- **Controller snooze makes silencing easier.** That is its purpose and also its risk. Only a designated button counts, and the 2-second guard, the snooze limit and the no-acknowledge rule keep gameplay from hiding an alert.
 - **Exclusive fullscreen** still hides every window on that monitor. Audio and other monitors are the answer; there is no alert path independent of this PC in v0.2.
 - **The v0.1 native checks were never done by hand** (overlay focus, monitor placement, audio, tray-failure exit). Do them before building on that code.
 - **The redesign touches the two largest files** (`dashboard.py` at 3,267 lines, `now_page.py` at 2,038), which makes merges from upstream harder. The token audit is done first and separately to keep the visual diff small.
