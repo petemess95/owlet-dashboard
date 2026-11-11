@@ -8,6 +8,7 @@ mod alert_loop;
 mod armed;
 mod audio;
 mod commands;
+mod hotkeys;
 mod http;
 mod overlay;
 mod settings;
@@ -300,6 +301,12 @@ fn main() {
             commands::do_show_main(app);
         }))
         .plugin(tauri_plugin_shell::init())
+        // Registration is Rust-only (no JS permission is granted to any window).
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(hotkeys::handle_event)
+                .build(),
+        )
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED)
@@ -320,6 +327,7 @@ fn main() {
         ])
         .manage(ServerProcess(Mutex::new(None)))
         .manage(Shell::default())
+        .manage(hotkeys::Hotkeys::default())
         .manage(settings::DesktopSettings::new(settings::Settings::default()))
         .on_menu_event(|app, event| tray::handle_menu(app, event.id().as_ref()))
         .setup(|app| {
@@ -328,7 +336,9 @@ fn main() {
             // Load shell settings before the alert thread starts. Any problem
             // degrades to defaults inside load_from; it never aborts setup.
             let loaded = settings::load_from(&settings::data_dir(), &log_line);
-            app.state::<settings::DesktopSettings>().replace(loaded);
+            app.state::<settings::DesktopSettings>().replace(loaded.clone());
+            // Saved hotkeys: a combination that fails is logged, never fatal.
+            hotkeys::register_saved(app.handle(), &loaded);
             ensure_server(app)?;
             let reachable = TcpStream::connect(SERVER_ADDR).is_ok();
             log_line(&format!("server reachable: {reachable}; creating windows"));

@@ -14,7 +14,6 @@ use serde_json::{json, Map, Value};
 
 pub(crate) const FILE_NAME: &str = "desktop-settings.json";
 const MAX_ID_LEN: usize = 256;
-const MAX_HOTKEY_LEN: usize = 64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Settings {
@@ -137,13 +136,39 @@ fn want_hotkey(field: &str, v: &Value) -> Result<Option<String>, SettingsError> 
     if v.is_null() {
         return Ok(None);
     }
-    match v.as_str() {
-        Some(s) if !s.is_empty() && s.chars().count() <= MAX_HOTKEY_LEN => Ok(Some(s.to_string())),
-        _ => Err(SettingsError::new(
-            field,
-            format!("must be null or a non-empty string of at most {MAX_HOTKEY_LEN} characters"),
-        )),
+    let s = v
+        .as_str()
+        .ok_or_else(|| SettingsError::new(field, "must be null or a key combination such as \"Ctrl+Shift+KeyS\""))?;
+    crate::hotkeys::parse(s)
+        .map_err(|why| SettingsError::new(field, format!("is not a valid key combination: {why}")))?;
+    Ok(Some(s.to_string()))
+}
+
+/// Two of our own actions may not share a combination. The error names the
+/// patched key (the later one if both were patched).
+fn check_hotkey_clash(next: &Settings, obj: &Map<String, Value>) -> Result<(), SettingsError> {
+    use crate::hotkeys::Action;
+    // A clash already in the file (e.g. hand-edited) must not block unrelated patches.
+    if !Action::ALL.iter().any(|a| obj.contains_key(a.key())) {
+        return Ok(());
     }
+    for (i, a) in Action::ALL.iter().enumerate() {
+        let Some(combo) = a.get(next) else { continue };
+        for b in &Action::ALL[..i] {
+            if b.get(next) == Some(combo) {
+                let (field, other) = if obj.contains_key(a.key()) || !obj.contains_key(b.key()) {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
+                return Err(SettingsError::new(
+                    field.key(),
+                    format!("Already used for {}", other.label()),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Settings {
@@ -226,6 +251,7 @@ pub(crate) fn validate_patch(current: &Settings, patch: &Value) -> Result<Settin
         }
     }
     next.check_combination()?;
+    check_hotkey_clash(&next, obj)?;
     Ok(next)
 }
 
@@ -338,14 +364,33 @@ impl DesktopSettings {
 
     /// Validate, save, then swap in memory. The lock is held throughout so
     /// concurrent patches cannot interleave; on any error memory is unchanged.
+    #[cfg(test)]
     pub(crate) fn apply_patch(&self, dir: &Path, patch: &Value) -> Result<Settings, SettingsError> {
+        self.apply_patch_with(dir, patch, |_, _| Ok(()), |()| {}, |()| {})
+    }
+
+    /// Like `apply_patch`, with a step between validation and saving (the OS
+    /// hotkey registration). `prepare` may reject; `commit` runs after a
+    /// successful save (or when nothing changed), `abort` if saving failed.
+    pub(crate) fn apply_patch_with<T>(
+        &self,
+        dir: &Path,
+        patch: &Value,
+        prepare: impl FnOnce(&Settings, &Settings) -> Result<T, SettingsError>,
+        commit: impl FnOnce(T),
+        abort: impl FnOnce(T),
+    ) -> Result<Settings, SettingsError> {
         let mut cur = self.guard();
         let next = validate_patch(&cur, patch)?;
+        let token = prepare(&cur, &next)?;
         if next != *cur {
-            save_to(dir, &next)
-                .map_err(|err| SettingsError::new("", format!("could not save settings: {err}")))?;
+            if let Err(err) = save_to(dir, &next) {
+                abort(token);
+                return Err(SettingsError::new("", format!("could not save settings: {err}")));
+            }
             *cur = next.clone();
         }
+        commit(token);
         Ok(next)
     }
 }
@@ -403,7 +448,7 @@ mod tests {
             flash_target: "\\\\.\\DISPLAY2".into(),
             alarm_sound: "pulse".into(),
             alarm_volume: 85,
-            hotkey_snooze: Some("Ctrl+Alt+S".into()),
+            hotkey_snooze: Some("Ctrl+Alt+KeyS".into()),
             controller_mode: "chosen".into(),
             controller_buttons: Some(0x1030),
             widget_opacity: 45,
@@ -552,12 +597,31 @@ mod tests {
     fn hotkeys() {
         for k in ["hotkey_snooze", "hotkey_acknowledge", "hotkey_widget", "hotkey_click_through"] {
             assert_eq!(patch(json!({ k: "Ctrl+F9" })).unwrap().to_json()[k], "Ctrl+F9");
-            assert!(patch(json!({ k: "x".repeat(64) })).is_ok());
+            assert_eq!(patch(json!({ k: "F9" })).unwrap().to_json()[k], "F9");
             assert!(patch(json!({ k: null })).unwrap().to_json()[k].is_null());
             assert_eq!(err_field(json!({ k: "" })), k);
             assert_eq!(err_field(json!({ k: "x".repeat(65) })), k);
+            assert_eq!(err_field(json!({ k: "Ctrl+S" })), k);
+            assert_eq!(err_field(json!({ k: "Shift+Ctrl+KeyS" })), k);
+            assert_eq!(err_field(json!({ k: "KeyS" })), k);
             assert_eq!(err_field(json!({ k: 5 })), k);
         }
+    }
+
+    #[test]
+    fn hotkey_clash_between_own_actions() {
+        let cur = Settings { hotkey_snooze: Some("Ctrl+F9".into()), ..Settings::default() };
+        let err = validate_patch(&cur, &json!({"hotkey_widget": "Ctrl+F9"})).unwrap_err();
+        assert_eq!(err.field, "hotkey_widget");
+        assert_eq!(err.message, "Already used for Snooze alert");
+        // Same patch sets both: the later key is reported.
+        let err = patch(json!({"hotkey_snooze": "Alt+F1", "hotkey_click_through": "Alt+F1"})).unwrap_err();
+        assert_eq!(err.field, "hotkey_click_through");
+        assert_eq!(err.message, "Already used for Snooze alert");
+        // Keeping or re-sending an action's own combination is fine; so is a swap.
+        assert!(validate_patch(&cur, &json!({"hotkey_snooze": "Ctrl+F9"})).is_ok());
+        let both = Settings { hotkey_widget: Some("Ctrl+F10".into()), ..cur };
+        assert!(validate_patch(&both, &json!({"hotkey_snooze": "Ctrl+F10", "hotkey_widget": "Ctrl+F9"})).is_ok());
     }
 
     #[test]

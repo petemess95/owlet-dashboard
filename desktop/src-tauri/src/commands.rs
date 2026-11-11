@@ -6,7 +6,8 @@ use tauri::{AppHandle, Manager};
 use crate::audio::stop_alarm;
 use crate::http::http_json;
 use crate::overlay::hide_overlay;
-use crate::settings::{data_dir, DesktopSettings};
+use crate::hotkeys::{self, Hotkeys};
+use crate::settings::{data_dir, DesktopSettings, SettingsError};
 use crate::tray::sync_widget_toggle;
 use crate::{log_line, Shell};
 
@@ -51,6 +52,17 @@ pub(crate) fn do_snooze(app: &AppHandle) {
     });
 }
 
+/// Placeholder for the acknowledge hotkey (built in R8). Deliberately does
+/// nothing to the alert: no POST, no silencing.
+pub(crate) fn do_acknowledge(_app: &AppHandle) {
+    log_line("acknowledge hotkey: not built yet");
+}
+
+/// Placeholder for the click-through hotkey (built in R9).
+pub(crate) fn do_toggle_click_through(_app: &AppHandle) {
+    log_line("click-through hotkey: not built yet");
+}
+
 pub(crate) fn do_test_alert(level: &str) {
     let body = format!("{{\"level\":\"{level}\",\"seconds\":20}}");
     if let Err(err) = http_json("POST", "/api/alert/test", Some(&body)) {
@@ -84,10 +96,37 @@ pub(crate) fn get_desktop_settings(state: tauri::State<'_, DesktopSettings>) -> 
 }
 
 /// Returns the full new settings, or `{error: {field, message}}` as a normal
-/// value (never a rejected promise). Nothing changes on error.
+/// value (never a rejected promise). Nothing changes on error. A changed
+/// hotkey is registered with the OS before anything is saved; if the OS
+/// refuses (another app holds it) the patch is rejected and the previous
+/// binding stays registered.
 #[tauri::command]
-pub(crate) fn set_desktop_settings(state: tauri::State<'_, DesktopSettings>, patch: Value) -> Value {
-    match state.apply_patch(&data_dir(), &patch) {
+pub(crate) fn set_desktop_settings(
+    app: AppHandle,
+    state: tauri::State<'_, DesktopSettings>,
+    patch: Value,
+) -> Value {
+    let hk = app.state::<Hotkeys>();
+    let be = hotkeys::OsBackend(&app);
+    let result = state.apply_patch_with(
+        &data_dir(),
+        &patch,
+        |cur, next| {
+            let changes = hotkeys::changed_actions(cur, next);
+            let plan = hotkeys::plan(&hk.bound(), &changes);
+            hotkeys::register_new(&be, &plan).map_err(|f| {
+                log_line(&format!("hotkey: cannot register {} ({}): {}", f.action.label(), f.combo, f.reason));
+                SettingsError { field: f.action.key().into(), message: f.message() }
+            })?;
+            Ok(plan)
+        },
+        |plan| {
+            hotkeys::release_old(&be, &plan, &log_line);
+            hk.set_bound(plan.bound_after);
+        },
+        |plan| hotkeys::abort_new(&be, &plan),
+    );
+    match result {
         Ok(new) => new.to_json(),
         Err(err) => {
             log_line(&format!("settings rejected ({}): {}", err.field, err.message));
