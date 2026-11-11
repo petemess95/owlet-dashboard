@@ -4,6 +4,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 use crate::audio::stop_alarm;
+use crate::autostart;
 use crate::http::http_json;
 use crate::overlay::hide_overlay;
 use crate::hotkeys::{self, Hotkeys};
@@ -108,6 +109,7 @@ pub(crate) fn set_desktop_settings(
 ) -> Value {
     let hk = app.state::<Hotkeys>();
     let be = hotkeys::OsBackend(&app);
+    let os = autostart::PluginBackend(&app);
     let result = state.apply_patch_with(
         &data_dir(),
         &patch,
@@ -118,13 +120,35 @@ pub(crate) fn set_desktop_settings(
                 log_line(&format!("hotkey: cannot register {} ({}): {}", f.action.label(), f.combo, f.reason));
                 SettingsError { field: f.action.key().into(), message: f.message() }
             })?;
-            Ok(plan)
+            // The OS entry is changed last; if that fails, undo the hotkeys.
+            let restore = if cur.autostart != next.autostart {
+                if let Err(why) = autostart::set_enabled(&os, next.autostart) {
+                    hotkeys::abort_new(&be, &plan);
+                    log_line(&format!("autostart: cannot set to {}: {why}", next.autostart));
+                    return Err(SettingsError {
+                        field: "autostart".into(),
+                        message: format!("Could not change Start with Windows: {why}"),
+                    });
+                }
+                Some(cur.autostart)
+            } else {
+                None
+            };
+            Ok((plan, restore))
         },
-        |plan| {
+        |(plan, _)| {
             hotkeys::release_old(&be, &plan, &log_line);
             hk.set_bound(plan.bound_after);
         },
-        |plan| hotkeys::abort_new(&be, &plan),
+        |(plan, restore)| {
+            hotkeys::abort_new(&be, &plan);
+            // Saving failed after the OS entry changed: put it back.
+            if let Some(prev) = restore {
+                if let Err(why) = autostart::set_enabled(&os, prev) {
+                    log_line(&format!("autostart: cannot restore to {prev}: {why}"));
+                }
+            }
+        },
     );
     match result {
         Ok(new) => new.to_json(),

@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -71,6 +72,28 @@ def test_desktop_pane_is_mounted_only_by_the_desktop_code_path():
     loader = shell.DESKTOP_SETTINGS_JS
     assert "__TAURI__" not in loader
     assert loader.index("function mount(") < loader.index("invoke(")
+
+
+def test_shell_can_open_settings_on_the_this_pc_pane_once():
+    js = shell.SHELL_JS
+    # The hook the desktop shell relies on (first-run walk-through).
+    assert "window.owletOpenSettings = function (name)" in js
+    hook = js[js.index("window.owletOpenSettings = function (name)"):]
+    hook = hook[:hook.index("\n  };")]
+    # Opens the modal and the named pane only when that pane exists; otherwise it
+    # waits (the desktop pane mounts after /api/health) and never opens anything.
+    assert "if (!settingsBackdrop || !exists) { pendingPane = name; return false; }" in hook
+    assert hook.index("return false;") < hook.index("openSettingsModal();") < hook.index("showSettingsPane(name);")
+    # The URL marker is handled once on load and cleared before the hook runs.
+    marker = js.index("location.hash === '#settings=desktop'")
+    assert js.index("history.replaceState", marker) < js.index("window.owletOpenSettings('desktop');", marker)
+    # A request that arrived before the pane existed is retried right after mount.
+    health = js.index("desktopMode = !!health.desktop_mode;")
+    mount = js.index("mountDesktopSettings();", health)
+    assert js.index("if (pendingPane) window.owletOpenSettings(pendingPane);", mount) > mount
+    # The marker is the same string the Rust shell appends to the main window URL.
+    rust = (Path(__file__).resolve().parent.parent / "desktop/src-tauri/src/autostart.rs").read_text(encoding="utf-8")
+    assert 'SETTINGS_FRAGMENT: &str = "#settings=desktop"' in rust
 
 
 def test_alerts_pane_rows_for_every_mode():

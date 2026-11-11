@@ -250,6 +250,28 @@ SHELL_JS = """<script>
       showSettingsPane('desktop');
     }
   }
+  // Lets the desktop shell open Settings on a pane at startup (first run).
+  // The "This PC" pane is mounted only after /api/health answers, so an early
+  // request waits for it; if the pane never appears nothing opens.
+  var pendingPane = null;
+  window.owletOpenSettings = function (name) {
+    name = String(name || '');
+    var exists = false;
+    document.querySelectorAll('.set-pane').forEach(function (pane) {
+      if (pane.dataset.pane === name) exists = true;
+    });
+    if (!settingsBackdrop || !exists) { pendingPane = name; return false; }
+    pendingPane = null;
+    openSettingsModal();
+    showSettingsPane(name);
+    return true;
+  };
+  // The shell opens the dashboard at /#settings=desktop on first run. Handle
+  // it once, then clear it so a reload does not reopen Settings.
+  if (location.hash === '#settings=desktop') {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (error) {}
+    window.owletOpenSettings('desktop');
+  }
   document.querySelectorAll('.set-rail [data-pane]').forEach(function (tab) {
     tab.addEventListener('click', function () { showSettingsPane(tab.dataset.pane); });
   });
@@ -1342,6 +1364,7 @@ SHELL_JS = """<script>
     // The "This PC" settings tab exists only here: desktop mode AND the Tauri
     // bridge. Hosted pages never get the tab, the pane, or an invoke call.
     mountDesktopSettings();
+    if (pendingPane) window.owletOpenSettings(pendingPane);
     if (localStorage.getItem('owletDesktopNoticeAck') === '1') return;
     var main = document.querySelector('.shell-main');
     if (!main) return;

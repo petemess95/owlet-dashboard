@@ -7,6 +7,7 @@
 mod alert_loop;
 mod armed;
 mod audio;
+mod autostart;
 mod commands;
 mod controller;
 mod controller_hid;
@@ -209,7 +210,7 @@ fn ensure_server(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn build_main_window(app: &tauri::App, url: &str) -> tauri::Result<WebviewWindow> {
+fn build_main_window(app: &tauri::App, url: &str, visible: bool) -> tauri::Result<WebviewWindow> {
     // The escape hatch from a remote instance: the remote page is sandboxed
     // from our IPC, so switching backends lives in a native menu that can
     // always navigate the window home to the launcher. Attached to "main"
@@ -230,7 +231,9 @@ fn build_main_window(app: &tauri::App, url: &str) -> tauri::Result<WebviewWindow
         .title("Owlet Dashboard")
         .inner_size(1280.0, 860.0)
         .center()
-        .focused(true)
+        // Hidden at login: the widget and alert loop are unaffected.
+        .visible(visible)
+        .focused(visible)
         .menu(menu)
         .initialization_script(&inject)
         .build()
@@ -303,6 +306,11 @@ fn main() {
             commands::do_show_main(app);
         }))
         .plugin(tauri_plugin_shell::init())
+        // Rust-only: no window is granted the plugin's JS permissions.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![autostart::AUTOSTART_ARG]),
+        ))
         // Registration is Rust-only (no JS permission is granted to any window).
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -342,14 +350,29 @@ fn main() {
             app.state::<settings::DesktopSettings>().replace(loaded.clone());
             // Saved hotkeys: a combination that fails is logged, never fatal.
             hotkeys::register_saved(app.handle(), &loaded);
+            // Keep the OS Run entry in step with the saved setting, off this
+            // thread so it can never delay the server or the alert loop.
+            let sync_handle = app.handle().clone();
+            let saved_autostart = loaded.autostart;
+            std::thread::spawn(move || {
+                autostart::sync_at_startup(&autostart::PluginBackend(&sync_handle), saved_autostart, &log_line);
+            });
+            let mode = autostart::startup_mode(
+                autostart::is_autostart_launch(std::env::args().skip(1)),
+                loaded.first_run_test_done,
+            );
+            log_line(&format!("startup mode: {mode:?}"));
             ensure_server(app)?;
             let reachable = TcpStream::connect(SERVER_ADDR).is_ok();
             log_line(&format!("server reachable: {reachable}; creating windows"));
             let url = format!("http://{}:{}/", SERVER_ADDR.0, SERVER_ADDR.1);
-            match build_main_window(app, &url) {
+            let main_url = autostart::main_window_url(&url, mode);
+            match build_main_window(app, &main_url, mode != autostart::Startup::Hidden) {
                 Ok(win) => {
                     log_line("window created");
-                    let _ = win.set_focus();
+                    if mode != autostart::Startup::Hidden {
+                        let _ = win.set_focus();
+                    }
                     // Auto-update is disabled in this fork: upstream's release
                     // feed would replace this build and drop local changes.
                 }
