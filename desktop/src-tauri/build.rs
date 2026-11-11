@@ -12,6 +12,7 @@ fn main() {
                 "get_desktop_settings",
                 "set_desktop_settings",
                 "list_monitors",
+                "list_audio_devices",
             ]),
         ),
     )

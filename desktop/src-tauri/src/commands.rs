@@ -157,3 +157,8 @@ pub(crate) fn show_native_toast(app: AppHandle, title: String, body: String) {
     #[cfg(not(windows))]
     let _ = (app, title, body);
 }
+
+#[tauri::command]
+pub(crate) async fn list_audio_devices() -> Value {
+    crate::audio::list_audio_devices()
+}

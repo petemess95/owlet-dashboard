@@ -15,6 +15,7 @@
     "allow-hide-widget",
     "allow-get-desktop-settings",
     "allow-set-desktop-settings",
-    "allow-list-monitors"
+    "allow-list-monitors",
+    "allow-list-audio-devices"
   ]
 }

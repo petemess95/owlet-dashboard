@@ -256,7 +256,8 @@ fn main() {
             commands::overlay_state,
             commands::get_desktop_settings,
             commands::set_desktop_settings,
-            commands::list_monitors
+            commands::list_monitors,
+            commands::list_audio_devices
         ])
         .manage(ServerProcess(Mutex::new(None)))
         .manage(Shell::default())

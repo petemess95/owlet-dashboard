@@ -99,7 +99,7 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
 
     if active == "amber" || active == "red" {
         if active == "red" {
-            start_alarm();
+            start_alarm(|| app.state::<crate::settings::DesktopSettings>().get());
         } else {
             stop_alarm();
         }
