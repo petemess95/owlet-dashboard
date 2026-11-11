@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "overlay",
-  "description": "The monitor-flash alert overlay: a bundled local page that only listens for state and snoozes on click.",
-  "windows": ["overlay"],
+  "description": "The monitor-flash alert overlay: a bundled local page that only listens for state, snoozes on click and acknowledges from its button. One window per flash target: overlay, overlay-1, ...",
+  "windows": ["overlay", "overlay-*"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-snooze-alert",
+    "allow-acknowledge-alert",
     "allow-overlay-state"
   ]
 }

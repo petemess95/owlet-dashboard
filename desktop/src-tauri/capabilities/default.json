@@ -11,6 +11,7 @@
     "core:window:allow-start-dragging",
     "allow-show-native-toast",
     "allow-snooze-alert",
+    "allow-acknowledge-alert",
     "allow-show-main",
     "allow-hide-widget",
     "allow-get-desktop-settings",

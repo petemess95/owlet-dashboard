@@ -11,8 +11,10 @@ use crate::armed::{
 };
 use crate::audio::{audio_status, endpoint_facts, start_alarm, stop_alarm};
 use crate::http::http_json;
-use crate::overlay::{hide_overlay, overlay_payload, pick_target, show_overlay, update_overlay_text};
-use crate::tray::{armed_tooltip, set_tooltip};
+use crate::overlay::{
+    hide_overlay, overlay_payload, pick_targets, show_overlays, snooze_seconds_of, update_overlay_text,
+};
+use crate::tray::{armed_tooltip, set_snooze_label, set_tooltip};
 #[cfg(test)]
 use crate::tray::tooltip_for;
 use crate::{log_line, Shell};
@@ -57,6 +59,12 @@ pub(crate) fn alert_loop(app: AppHandle) {
                     }
                 }
                 failures = 0;
+                if let Some(secs) = snooze_seconds_of(&state) {
+                    let old = app.state::<Shell>().snooze_seconds.swap(secs, Ordering::SeqCst);
+                    if old != secs {
+                        set_snooze_label(&app, secs);
+                    }
+                }
                 apply_state(&app, &state, generation);
                 tracker.last_state = Some(state);
             }
@@ -68,7 +76,8 @@ pub(crate) fn alert_loop(app: AppHandle) {
                 if failures >= FAILS_BEFORE_GIVING_UP {
                     let shell = app.state::<Shell>();
                     if let Some(mut applied) = shell.poll_state(generation) {
-                        let state = unreachable_state(&applied, Instant::now());
+                        let mut state = unreachable_state(&applied, Instant::now());
+                        state["snooze_seconds"] = json!(shell.snooze_secs());
                         apply_ui(&app, &state, &mut applied);
                     };
                 }
@@ -197,18 +206,22 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
         } else {
             stop_alarm();
         }
-        let Some(target) = pick_target(app) else { return };
-        let key = format!(
-            "{active}|{},{}|{}x{}|{}",
-            target.pos.x, target.pos.y, target.size.width, target.size.height, target.border
-        );
-        let payload = overlay_payload(state, dev, target);
+        let flash_target = app.state::<crate::settings::DesktopSettings>().get().flash_target;
+        let targets = pick_targets(app, &flash_target);
+        if targets.is_empty() {
+            return;
+        }
+        let mut key = active.clone();
+        for t in &targets {
+            key += &format!("|{},{}|{}x{}|{}", t.pos.x, t.pos.y, t.size.width, t.size.height, t.border);
+        }
+        let shown: Vec<_> = targets.iter().map(|t| (*t, overlay_payload(state, dev, *t))).collect();
         let changed = applied.key != key;
         if changed {
-            show_overlay(app, payload, target);
+            show_overlays(app, &shown);
             applied.key = key;
         } else {
-            update_overlay_text(app, payload);
+            update_overlay_text(app, &shown);
         }
     } else {
         let changed = applied.key != "none";

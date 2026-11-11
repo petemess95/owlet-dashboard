@@ -6,7 +6,7 @@ use tauri::{AppHandle, Manager};
 use crate::audio::stop_alarm;
 use crate::autostart;
 use crate::http::http_json;
-use crate::overlay::hide_overlay;
+use crate::overlay::{hide_overlay, payload_for};
 use crate::hotkeys::{self, Hotkeys};
 use crate::settings::{data_dir, DesktopSettings, SettingsError};
 use crate::tray::sync_widget_toggle;
@@ -39,13 +39,15 @@ pub(crate) fn do_toggle_widget(app: &AppHandle) {
 }
 
 pub(crate) fn do_snooze(app: &AppHandle) {
-    app.state::<Shell>().snooze(|applied| {
+    let shell = app.state::<Shell>();
+    let secs = shell.snooze_secs();
+    shell.snooze(|applied| {
         // Silence locally before doing any HTTP, including when the server is
         // down. Preserve the previous level for an amber disconnection warning.
         hide_overlay(app);
         stop_alarm();
         applied.key.clear();
-        applied.snoozed_until = Some(Instant::now() + Duration::from_secs(15));
+        applied.snoozed_until = Some(Instant::now() + Duration::from_secs(secs));
         if let Err(err) = http_json("POST", "/api/alert/snooze", None) {
             log_line(&format!("snooze failed: {err}"));
         }
@@ -53,10 +55,38 @@ pub(crate) fn do_snooze(app: &AppHandle) {
     });
 }
 
-/// Placeholder for the acknowledge hotkey (built in R8). Deliberately does
-/// nothing to the alert: no POST, no silencing.
-pub(crate) fn do_acknowledge(_app: &AppHandle) {
-    log_line("acknowledge hotkey: not built yet");
+/// "I'm checking": silence every overlay and the alarm, then POST
+/// acknowledge. The server then reports active_level "none" until recovery
+/// plus grace, and ends it itself on escalation, so the next poll fires red
+/// normally. If the POST fails, act exactly like snooze.
+pub(crate) fn do_acknowledge(app: &AppHandle) {
+    let shell = app.state::<Shell>();
+    acknowledge_on(
+        &shell,
+        || {
+            hide_overlay(app);
+            stop_alarm();
+        },
+        || http_json("POST", "/api/alert/acknowledge", None),
+    );
+}
+
+/// The testable body of `do_acknowledge`: everything runs inside
+/// `Shell::snooze`, so a poll begun before (or during the POST) is discarded.
+pub(crate) fn acknowledge_on(
+    shell: &Shell,
+    silence: impl FnOnce(),
+    post: impl FnOnce() -> Result<Value, String>,
+) {
+    let secs = shell.snooze_secs();
+    shell.snooze(|applied| {
+        silence();
+        applied.key.clear();
+        if let Err(err) = post() {
+            log_line(&format!("acknowledge failed, snoozing {secs} s instead: {err}"));
+            applied.snoozed_until = Some(Instant::now() + Duration::from_secs(secs));
+        }
+    });
 }
 
 /// Placeholder for the click-through hotkey (built in R9).
@@ -77,6 +107,11 @@ pub(crate) async fn snooze_alert(app: AppHandle) {
 }
 
 #[tauri::command]
+pub(crate) async fn acknowledge_alert(app: AppHandle) {
+    do_acknowledge(&app);
+}
+
+#[tauri::command]
 pub(crate) fn show_main(app: AppHandle) {
     do_show_main(&app);
 }
@@ -87,8 +122,8 @@ pub(crate) fn hide_widget(app: AppHandle) {
 }
 
 #[tauri::command]
-pub(crate) fn overlay_state(app: AppHandle) -> Value {
-    app.state::<Shell>().overlay_payload.lock().unwrap().clone()
+pub(crate) fn overlay_state(app: AppHandle, window: tauri::WebviewWindow) -> Value {
+    payload_for(&app, window.label())
 }
 
 #[tauri::command]
@@ -248,4 +283,60 @@ pub(crate) async fn capture_controller_button() -> Value {
 #[tauri::command]
 pub(crate) fn armed_state(app: AppHandle) -> Value {
     app.state::<Shell>().armed_verdict()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn acknowledge_post_failure_snoozes_for_the_configured_length() {
+        let shell = Shell::default();
+        shell.snooze_seconds.store(60, Ordering::SeqCst);
+        shell.applied.lock().unwrap().key = "red|x".into();
+        let mut silenced = false;
+        let before = Instant::now();
+        acknowledge_on(&shell, || silenced = true, || Err("connection refused".into()));
+        assert!(silenced);
+        let applied = shell.applied.lock().unwrap();
+        assert!(applied.key.is_empty());
+        let until = applied.snoozed_until.expect("fallback snooze");
+        assert!(until >= before + Duration::from_secs(60));
+        assert!(until <= Instant::now() + Duration::from_secs(60));
+    }
+
+    #[test]
+    fn acknowledge_post_success_sets_no_local_snooze() {
+        let shell = Shell::default();
+        acknowledge_on(&shell, || {}, || Ok(serde_json::json!({ "acknowledged_until": "x" })));
+        assert!(shell.applied.lock().unwrap().snoozed_until.is_none());
+        // Nothing alerting: the server returns null; still harmless.
+        acknowledge_on(&shell, || {}, || Ok(Value::Null));
+        assert!(shell.applied.lock().unwrap().snoozed_until.is_none());
+    }
+
+    #[test]
+    fn acknowledge_discards_polls_started_before_and_during_the_post() {
+        let shell = Shell::default();
+        let before = shell.snooze_generation.load(Ordering::SeqCst);
+        let mut during = None;
+        acknowledge_on(&shell, || {}, || {
+            during = Some(shell.snooze_generation.load(Ordering::SeqCst));
+            Ok(Value::Null)
+        });
+        assert!(shell.poll_state(before).is_none());
+        assert!(shell.poll_state(during.unwrap()).is_none());
+        let after = shell.snooze_generation.load(Ordering::SeqCst);
+        assert!(shell.poll_state(after).is_some());
+    }
+
+    #[test]
+    fn acknowledge_falls_back_to_15_s_before_the_server_is_heard() {
+        let shell = Shell::default();
+        let before = Instant::now();
+        acknowledge_on(&shell, || {}, || Err("down".into()));
+        let until = shell.applied.lock().unwrap().snoozed_until.unwrap();
+        assert!(until >= before + Duration::from_secs(15) && until < before + Duration::from_secs(16));
+    }
 }

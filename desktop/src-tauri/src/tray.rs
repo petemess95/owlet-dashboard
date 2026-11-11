@@ -3,7 +3,7 @@ use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-use crate::commands::{do_show_main, do_snooze, do_test_alert, do_toggle_widget};
+use crate::commands::{do_acknowledge, do_show_main, do_snooze, do_test_alert, do_toggle_widget};
 use crate::{launcher_url, Shell};
 
 pub(crate) const TRAY_ID: &str = "main";
@@ -70,6 +70,17 @@ pub(crate) fn armed_tooltip(state: &Value, dev: Option<&Value>, fault: Option<&s
     text.chars().take(126).collect()
 }
 
+pub(crate) fn snooze_label(secs: u64) -> String {
+    format!("Snooze alert ({secs} s)")
+}
+
+/// Called by the alert thread only when the configured length changes.
+pub(crate) fn set_snooze_label(app: &AppHandle, secs: u64) {
+    if let Some(item) = app.state::<Shell>().snooze_item.lock().unwrap().as_ref() {
+        let _ = item.set_text(snooze_label(secs));
+    }
+}
+
 pub(crate) fn sync_widget_toggle(app: &AppHandle) {
     let visible = app
         .get_webview_window("widget")
@@ -87,6 +98,8 @@ pub(crate) fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         return Err(std::io::Error::other("forced tray creation failure").into());
     }
     let widget_toggle = MenuItem::with_id(app, "tray_widget", "Hide widget", true, None::<&str>)?;
+    let secs = app.state::<Shell>().snooze_secs();
+    let snooze = MenuItem::with_id(app, "tray_snooze", snooze_label(secs), true, None::<&str>)?;
     let test = SubmenuBuilder::new(app, "Test alert")
         .text("test_amber", "Amber (20 s)")
         .text("test_red", "Red (20 s)")
@@ -95,12 +108,14 @@ pub(crate) fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
         .text("tray_show", "Show dashboard")
         .item(&widget_toggle)
-        .text("tray_snooze", "Snooze alert (15 s)")
+        .item(&snooze)
+        .text("tray_acknowledge", "I'm checking (acknowledge)")
         .item(&test)
         .item(&PredefinedMenuItem::separator(app)?)
         .text("tray_quit", "Quit Owlet Dashboard")
         .build()?;
     *app.state::<Shell>().widget_toggle.lock().unwrap() = Some(widget_toggle);
+    *app.state::<Shell>().snooze_item.lock().unwrap() = Some(snooze);
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Owlet Dashboard")
         .menu(&menu)
@@ -141,6 +156,10 @@ pub(crate) fn handle_menu(app: &AppHandle, id: &str) {
             let app = app.clone();
             std::thread::spawn(move || do_snooze(&app));
         }
+        "tray_acknowledge" => {
+            let app = app.clone();
+            std::thread::spawn(move || do_acknowledge(&app));
+        }
         "test_amber" | "test_red" | "test_stop" => {
             let level = match id {
                 "test_amber" => "amber",
@@ -158,6 +177,14 @@ pub(crate) fn handle_menu(app: &AppHandle, id: &str) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn snooze_label_shows_the_configured_length() {
+        assert_eq!(snooze_label(15), "Snooze alert (15 s)");
+        assert_eq!(snooze_label(5), "Snooze alert (5 s)");
+        assert_eq!(snooze_label(45), "Snooze alert (45 s)");
+        assert_eq!(snooze_label(120), "Snooze alert (120 s)");
+    }
 
     #[test]
     fn tooltip_distinguishes_an_unlinked_account_from_remote_viewing() {

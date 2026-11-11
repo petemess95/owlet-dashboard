@@ -19,6 +19,7 @@ mod tray;
 
 use alert_loop::AppliedState;
 
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::TcpStream;
@@ -27,7 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::menu::{MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::{
     AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
@@ -55,8 +56,13 @@ pub(crate) struct ServerProcess(Mutex<Option<Sidecar>>);
 pub(crate) struct Shell {
     pub(crate) tray_available: AtomicBool,
     pub(crate) widget_toggle: Mutex<Option<MenuItem<Wry>>>,
-    /// Last payload pushed to the overlay page (it fetches this on load).
-    pub(crate) overlay_payload: Mutex<Value>,
+    /// Last payload pushed to each overlay window, by label (each page
+    /// fetches its own on load; a missing label means "none").
+    pub(crate) overlay_payload: Mutex<HashMap<String, Value>>,
+    /// The tray's "Snooze alert (N s)" entry, relabelled when N changes.
+    pub(crate) snooze_item: Mutex<Option<MenuItem<Wry>>>,
+    /// Configured snooze length from the last good /api/alert-state.
+    pub(crate) snooze_seconds: AtomicU64,
     /// What the alert thread last applied; cleared to force a re-apply.
     pub(crate) applied: Mutex<AppliedState>,
     pub(crate) snooze_generation: AtomicU64,
@@ -69,7 +75,9 @@ impl Default for Shell {
         Self {
             tray_available: AtomicBool::new(false),
             widget_toggle: Mutex::new(None),
-            overlay_payload: Mutex::new(json!({ "level": "none" })),
+            overlay_payload: Mutex::new(HashMap::new()),
+            snooze_item: Mutex::new(None),
+            snooze_seconds: AtomicU64::new(overlay::DEFAULT_SNOOZE_SECONDS),
             applied: Mutex::new(AppliedState {
                 key: "none".into(),
                 level: "none".into(),
@@ -96,6 +104,12 @@ impl Shell {
 
     pub(crate) fn set_armed_verdict(&self, verdict: Value) {
         *self.armed.lock().unwrap_or_else(|p| p.into_inner()) = verdict;
+    }
+
+    /// Snooze length for local silencing: the configured value, 15 s until
+    /// the server has been heard.
+    pub(crate) fn snooze_secs(&self) -> u64 {
+        self.snooze_seconds.load(Ordering::SeqCst)
     }
 
     pub(crate) fn snooze(&self, action: impl FnOnce(&mut AppliedState)) {
@@ -320,12 +334,13 @@ fn main() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED)
-                .with_denylist(&["overlay"])
+                .with_filter(|label| !overlay::is_overlay_label(label))
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
             commands::show_native_toast,
             commands::snooze_alert,
+            commands::acknowledge_alert,
             commands::show_main,
             commands::hide_widget,
             commands::overlay_state,

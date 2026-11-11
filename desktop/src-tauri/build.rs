@@ -6,6 +6,7 @@ fn main() {
             tauri_build::AppManifest::new().commands(&[
                 "show_native_toast",
                 "snooze_alert",
+                "acknowledge_alert",
                 "show_main",
                 "hide_widget",
                 "overlay_state",
