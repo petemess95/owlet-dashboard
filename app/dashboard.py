@@ -3,7 +3,7 @@ app shell for signed-in users; share links get a standalone themed page."""
 
 from app.shell import THEME_RESOLVER, render_shell
 
-DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
+DATA_HEAD = r"""  <meta name="theme-color" content="#070925" />
   __PWA_HEAD__
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
@@ -21,27 +21,31 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
       --line: var(--surface-line);
       /* Faint fill for inset panels/rows -- adapts to either theme. */
       --inset: color-mix(in srgb, var(--ink) 5%, transparent);
+      /* --radius-control is a full pill now, which only suits one-line
+         controls. Multi-line fields and boxes nested inside a card use these
+         (page-local; candidates for theme.css). */
+      --radius-field: 14px;
+      --radius-inner: 18px;
     }
     * { box-sizing: border-box; }
     .shell { width: 100%; margin: 0 auto; padding: 0 0 32px; }
     h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
-    h3 { margin: 0 0 8px; font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .13em; font-weight: 700; }
+    h3 { margin: 0 0 8px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .13em; font-weight: 700; }
     .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); display: inline-block; }
     .status-dot.good { background: var(--good); }
     .status-dot.offline { background: var(--bad); }
     .toolbar, .panel, .card {
       background: var(--panel);
-      border: 1px solid var(--surface-line);
+      border: 0;
       box-shadow: var(--shadow);
       border-radius: var(--radius-card);
       min-width: 0;
     }
-    :root[data-theme="dark"] .toolbar { backdrop-filter: blur(14px); }
-    .legacy-note { margin: 14px 0 0; padding: 8px 14px; font-size: 12.5px; line-height: 1.5;
+    .legacy-note { margin: 14px 0 0; padding: 10px 18px; font-size: 12.5px; line-height: 1.5;
       color: var(--dim); border: 1px dashed var(--surface-line);
       border-radius: var(--radius-card); }
     .legacy-note a { color: var(--accent); text-decoration: none; font-weight: 600; }
-    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 10px; margin: 14px 0; position: sticky; top: 62px; z-index: 10; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 14px; margin: 14px 0; position: sticky; top: 62px; z-index: 10; }
     .control-group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .refresh-cluster { margin-left: auto; justify-content: flex-end; }
     .toolbar-right { position: relative; }
@@ -49,17 +53,18 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     .mobile-label { display: none; }
     label { color: var(--muted); font-size: .85rem; font-weight: 600; }
     select, input, button {
-      border: 1px solid var(--line); background: var(--surface); color: var(--text);
-      border-radius: var(--radius-control); padding: .55rem .7rem; font: inherit;
+      border: 1px solid var(--line); background: var(--surface-inset); color: var(--text);
+      border-radius: var(--radius-control); padding: .5rem .9rem; font: inherit;
     }
-    button { cursor: pointer; font-weight: 600; }
+    /* pill buttons: a raised capsule, no outline until hovered */
+    button { cursor: pointer; font-weight: 600; background: var(--bg-accent-2); border-color: transparent; }
     button:hover { border-color: var(--accent); }
     button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
     button.icon-button { width: 38px; height: 38px; padding: 0; display: inline-grid; place-items: center; border-radius: 999px; background: var(--inset); }
     .grid { display: grid; gap: 14px; }
     .grid > * { min-width: 0; }
     .chart-stack { display: grid; gap: 14px; }
-    .chart-panel { padding: 18px 18px 14px; }
+    .chart-panel { padding: 20px 20px 16px; }
     .chart-frame { position: relative; width: 100%; }
     .chart-frame.main { height: 370px; }
     .chart-frame.companion { height: 190px; }
@@ -73,18 +78,18 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     .info-popover-wrap { position: relative; display: inline-flex; align-items: center; }
     .companion-info { position: absolute; right: 6px; top: 6px; z-index: 2; }
     .info-button { width: 28px; height: 28px; border-radius: 999px; padding: 0; display: inline-grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
-    .info-popover { display: none; position: absolute; right: 0; top: calc(100% + 8px); width: min(360px, calc(100vw - 32px)); z-index: 25; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 14px; padding: 12px; color: var(--text); font-size: .84rem; line-height: 1.35; text-transform: none; letter-spacing: normal; font-weight: 400; }
+    .info-popover { display: none; position: absolute; right: 0; top: calc(100% + 8px); width: min(360px, calc(100vw - 32px)); z-index: 25; background: var(--surface-solid); border: 1px solid var(--line); box-shadow: var(--shadow-pop); border-radius: var(--radius-inner); padding: 14px; color: var(--text); font-size: .84rem; line-height: 1.35; text-transform: none; letter-spacing: normal; font-weight: 400; }
     .info-popover-wrap:hover .info-popover, .info-popover-wrap:focus-within .info-popover { display: block; }
-    .chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 10px; padding: 8px; border: 1px solid var(--surface-line); background: var(--inset); border-radius: 14px; }
+    .chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 10px; padding: 8px 10px; background: var(--surface-inset); border-radius: var(--radius-inner); }
     .control-section { display: contents; }
-    .control-section-title { color: var(--faint); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .13em; margin-right: 2px; }
+    .control-section-title { color: var(--dim); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .13em; margin-right: 2px; }
     .control-field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: .78rem; font-weight: 600; }
     .control-field select { min-width: 124px; }
-    .chart-toolbar .inline-toggle { border: 1px solid var(--surface-line); border-radius: 999px; padding: 6px 9px; background: var(--surface); color: var(--text); }
+    .chart-toolbar .inline-toggle { border-radius: var(--radius-pill); padding: 6px 12px; background: var(--surface); color: var(--text); }
     .coverage-chip { margin-left: auto; white-space: nowrap; }
     .o2-menu-wrap { position: relative; }
-    .o2-add-button { background: var(--accent); color: var(--on-accent); border-color: var(--accent); min-width: 54px; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent); }
-    .o2-add-menu { position: absolute; right: 0; top: calc(100% + 8px); display: grid; gap: 8px; width: min(240px, calc(100vw - 32px)); padding: 10px; border: 1px solid var(--surface-line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); z-index: 28; }
+    .o2-add-button { background: var(--accent); color: var(--on-accent); border-color: var(--accent); min-width: 54px; }
+    .o2-add-menu { position: absolute; right: 0; top: calc(100% + 8px); display: grid; gap: 8px; width: min(240px, calc(100vw - 32px)); padding: 10px; border: 1px solid var(--surface-line); border-radius: var(--radius-inner); background: var(--surface-solid); box-shadow: var(--shadow-pop); z-index: 28; }
     .o2-add-menu.hidden { display: none; }
     .o2-add-menu button { justify-content: flex-start; text-align: left; }
     .share-only-hidden { display: none !important; }
@@ -99,15 +104,15 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     @keyframes pulseNew { 0% { background: color-mix(in srgb, var(--good) 18%, transparent); } 100% { background: transparent; } }
     .initial-loading { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(9px); transition: opacity .22s ease, visibility .22s ease; }
     .initial-loading.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
-    .loading-card { width: min(360px, 100%); border: 1px solid var(--surface-line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow); padding: 18px; display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
+    .loading-card { width: min(360px, 100%); border: 0; border-radius: var(--radius-card); background: var(--surface-solid); box-shadow: var(--shadow-pop); padding: 20px; display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
     .loading-spinner { width: 32px; height: 32px; border-radius: 999px; border: 4px solid var(--accent-soft); border-top-color: var(--accent); animation: loadingSpin .8s linear infinite; }
     .loading-title { font-weight: 700; letter-spacing: -.02em; }
     .loading-message { color: var(--muted); font-size: .9rem; margin-top: 2px; }
     .initial-loading.error .loading-spinner { animation: none; border-color: color-mix(in srgb, var(--bad) 30%, transparent); border-top-color: var(--bad); }
     @keyframes loadingSpin { to { transform: rotate(360deg); } }
     .glance-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0 14px; }
-    .glance-card { min-height: 92px; padding: 12px 13px; }
-    .glance-card strong { display: block; font-size: clamp(1.45rem, 3vw, 2.25rem); line-height: 1; letter-spacing: -.03em; margin: 4px 0; font-variant-numeric: tabular-nums; }
+    .glance-card { min-height: 92px; padding: 16px 20px; }
+    .glance-card strong { display: block; font-size: clamp(1.45rem, 3vw, 2.25rem); line-height: 1; font-weight: 700; letter-spacing: -.01em; margin: 6px 0; font-variant-numeric: tabular-nums; }
     .glance-card small { display: block; color: var(--muted); line-height: 1.25; }
     .glance-card .inline-stat { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
     .glance-card .inline-stat.up { color: var(--good); }
@@ -122,28 +127,29 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     .account-add-button { padding-inline: .65rem; }
     .challenge-button { background: var(--accent-soft); color: var(--accent); }
     .challenge-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-size: .72rem; font-weight: 700; }
-    .challenge-popover { position: absolute; right: 0; top: calc(100% + 8px); width: min(520px, calc(100vw - 28px)); max-height: min(74vh, 620px); overflow: auto; background: var(--surface-solid); backdrop-filter: blur(20px) saturate(150%); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow); padding: 12px; z-index: 32; }
+    .challenge-popover { position: absolute; right: 0; top: calc(100% + 8px); width: min(520px, calc(100vw - 28px)); max-height: min(74vh, 620px); overflow: auto; background: var(--surface-solid); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-pop); padding: 16px; z-index: 32; }
     .challenge-popover.hidden, .challenge-modal.hidden { display: none; }
     .daily-insights-button { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
     .daily-insights-summary { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 12px; }
-    .daily-insights-summary span { background: var(--inset); border: 1px solid var(--line); border-radius: 999px; padding: 7px 10px; font-size: .83rem; color: var(--muted); }
-    .daily-insights-chart { height: 260px; margin: 8px 0 12px; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--inset); }
+    .daily-insights-summary span { background: var(--surface-inset); border-radius: var(--radius-pill); padding: 7px 12px; font-size: .83rem; color: var(--muted); }
+    .daily-insights-chart { height: 260px; margin: 8px 0 12px; padding: 12px; border-radius: var(--radius-inner); background: var(--surface-inset); }
     .daily-insights-table th, .daily-insights-table td { text-align: right; }
     .daily-insights-table th:first-child, .daily-insights-table td:first-child { text-align: left; position: sticky; left: 0; background: inherit; }
     .daily-insights-table tbody tr:hover td { background: var(--inset); }
     .challenge-list { display: grid; gap: 8px; max-height: 390px; overflow: auto; }
-    .challenge-item { border: 1px solid var(--surface-line); border-left: 5px solid var(--accent); border-radius: 13px; padding: 9px 10px; background: var(--accent-soft); }
+    .challenge-item { border: 0; border-left: 5px solid var(--accent); border-radius: var(--radius-field); padding: 9px 12px; background: var(--accent-soft); }
     .challenge-item.active { border-left-color: var(--good); background: color-mix(in srgb, var(--good) 9%, transparent); }
     .challenge-title { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
     .challenge-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 7px; font-size: .78rem; }
-    .challenge-metrics span { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--radius-control); padding: 5px 6px; }
+    .challenge-metrics span { background: var(--surface); border-radius: var(--radius-field); padding: 5px 8px; }
     .challenge-empty-actions { display: grid; gap: 8px; margin-top: 14px; }
     .challenge-modal { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: var(--scrim); }
-    .challenge-modal-card { width: min(980px, 100%); max-height: min(780px, calc(100vh - 32px)); overflow: auto; background: var(--surface-solid); border: 1px solid var(--surface-line); border-radius: var(--radius-card); box-shadow: var(--shadow); padding: 16px; }
-    .challenge-edit-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; padding: 12px; background: var(--inset); border: 1px solid var(--line); border-radius: 14px; }
+    .challenge-modal-card { width: min(980px, 100%); max-height: min(780px, calc(100vh - 32px)); overflow: auto; background: var(--surface-solid); border: 0; border-radius: var(--radius-card); box-shadow: var(--shadow-pop); padding: 20px; }
+    .challenge-edit-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; padding: 14px; background: var(--surface-inset); border-radius: var(--radius-inner); }
     .challenge-edit-form label { display: grid; gap: 5px; }
     .challenge-edit-form input, .challenge-edit-form textarea { width: 100%; }
-    .challenge-edit-form textarea { min-height: 66px; resize: vertical; border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: var(--radius-control); padding: .55rem .7rem; font: inherit; }
+    .challenge-edit-form input { background: var(--surface); }
+    .challenge-edit-form textarea { min-height: 66px; resize: vertical; border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: var(--radius-field); padding: .55rem .8rem; font: inherit; }
     .danger-button { background: color-mix(in srgb, var(--bad) 9%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
     .challenge-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
     .challenge-summary-grid .mini { min-width: 0; }
@@ -157,30 +163,30 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     .state-segment.light { background: color-mix(in srgb, var(--sleep-light) 75%, transparent); }
     .state-segment.deep { background: color-mix(in srgb, var(--sleep-deep) 75%, transparent); }
     .state-segment.awake { background: color-mix(in srgb, var(--awake) 72%, transparent); }
-    .state-segment.inactive { background: color-mix(in srgb, var(--faint) 60%, transparent); }
-    .state-segment.offline { background: color-mix(in srgb, var(--faint) 35%, transparent); }
-    .state-tooltip { position: fixed; z-index: 120; max-width: min(300px, calc(100vw - 24px)); background: var(--ink); color: var(--bg); border: 1px solid var(--surface-line); box-shadow: var(--shadow); border-radius: 12px; padding: 8px 10px; font-size: .78rem; line-height: 1.3; pointer-events: none; }
+    .state-segment.inactive { background: var(--chart-strip-inactive); }
+    .state-segment.offline { background: var(--chart-strip-offline); }
+    .state-tooltip { position: fixed; z-index: 120; max-width: min(300px, calc(100vw - 24px)); background: var(--ink); color: var(--bg); border: 1px solid var(--surface-line); box-shadow: var(--shadow-pop); border-radius: 12px; padding: 8px 10px; font-size: .78rem; line-height: 1.3; pointer-events: none; }
     .state-tooltip.hidden { display: none; }
     .state-tooltip b { display: block; color: var(--bg); margin-bottom: 2px; }
     .sleep-overlay-controls { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px 12px; color: var(--muted); font-size: .78rem; }
     .inline-toggle { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
     .inline-toggle input { padding: 0; accent-color: var(--accent); }
-    .card, .panel { padding: 16px; }
+    .card, .panel { padding: 20px; }
     .hero-card { min-height: 172px; }
-    .eyebrow { color: var(--faint); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .13em; }
-    .big { font-size: clamp(2.1rem, 5vw, 4.1rem); line-height: .92; font-weight: 700; letter-spacing: -.04em; margin: 9px 0; font-variant-numeric: tabular-nums; }
+    .eyebrow { color: var(--dim); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .13em; }
+    .big { font-size: clamp(2.1rem, 5vw, 4.1rem); line-height: .92; font-weight: 700; letter-spacing: -.02em; margin: 9px 0; font-variant-numeric: tabular-nums; }
     .sub { color: var(--muted); font-size: .94rem; line-height: 1.35; }
     .mini-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-    .mini { background: var(--inset); border: 1px solid var(--line); border-radius: 12px; padding: 9px 10px; min-width: 98px; }
+    .mini { background: var(--surface-inset); border-radius: var(--radius-field); padding: 9px 12px; min-width: 98px; }
     .mini b { display: block; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
-    .metric-value { font-size: 2.1rem; line-height: 1; font-weight: 700; letter-spacing: -.03em; margin: 8px 0 5px; font-variant-numeric: tabular-nums; }
+    .metric-value { font-size: 2.1rem; line-height: 1; font-weight: 700; letter-spacing: -.01em; margin: 8px 0 5px; font-variant-numeric: tabular-nums; }
     .trend-improving, .trend-up { color: var(--good); }
     .trend-worsening, .trend-down { color: var(--bad); }
     .trend-stable, .trend-flat { color: var(--accent); }
     .trend-unknown { color: var(--muted); }
     .panel-title { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 8px; }
     /* Chart/panel headers use the same quiet uppercase label as the other views. */
-    .panel-title h2 { font-size: 11px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--faint); }
+    .panel-title h2 { font-size: 12px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--dim); }
     .small { color: var(--muted); font-size: .86rem; }
     .insight-text { font-size: 1.08rem; font-weight: 600; line-height: 1.35; margin: 12px 0; }
     .details-grid { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); margin-top: 14px; }
@@ -190,19 +196,30 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     .reading-detail-panel .raw-box { max-height: 520px; }
     table { width: 100%; border-collapse: collapse; font-size: .9rem; font-variant-numeric: tabular-nums; }
     th, td { padding: 10px 9px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
-    th { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; background: var(--bg); position: sticky; top: 0; z-index: 1; }
+    th { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; background: var(--surface-inset); position: sticky; top: 0; z-index: 1; }
     tr:hover td { background: var(--inset); }
     tr.offline-row td { background: var(--inset); color: var(--dim); }
     tr.offline-row:hover td { background: color-mix(in srgb, var(--ink) 9%, transparent); }
     tr.challenge-row td { background: var(--accent-soft); color: var(--accent); }
     tr.selected-row td { background: color-mix(in srgb, var(--accent) 10%, var(--surface)) !important; }
-    .table-wrap { overflow: auto; max-width: 100%; max-height: 460px; border: 1px solid var(--line); border-radius: 14px; }
-    .raw-box { white-space: pre-wrap; word-break: break-word; background: var(--ink); color: var(--bg); border-radius: 14px; padding: 14px; max-height: 280px; overflow: auto; font-family: var(--font-mono); font-size: .8rem; }
+    .table-wrap { overflow: auto; max-width: 100%; max-height: 460px; border-radius: var(--radius-inner); }
+    .raw-box { white-space: pre-wrap; word-break: break-word; background: var(--surface-inset); color: var(--ink); border-radius: var(--radius-inner); padding: 14px; max-height: 280px; overflow: auto; font-family: var(--font-mono); font-size: .8rem; }
     .empty { padding: 28px; text-align: center; color: var(--muted); border: 1px dashed var(--surface-line); border-radius: var(--radius-card); background: var(--inset); }
     .progress { height: 10px; border-radius: 999px; overflow: hidden; background: var(--nodata); margin-top: 12px; display: flex; }
     .progress span:nth-child(1) { background: var(--sleep-light); }
     .progress span:nth-child(2) { background: var(--sleep-deep); }
     .progress span:nth-child(3) { background: var(--awake); }
+    /* Desktop-mode notice: a caution, so it takes --warn (never --awake) and
+       carries a warning glyph and a bold lead-in so colour is not the only signal. */
+    .collector-notice { display: flex; gap: 12px; align-items: center; margin: 14px 0 0; padding: 10px 16px;
+      border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+      background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+      border-radius: var(--radius-inner); font-size: 13px; line-height: 1.5; color: var(--dim); }
+    .collector-notice .cn-icon { flex: none; color: var(--warn); font-size: 16px; line-height: 1; }
+    .collector-notice b { color: var(--ink); }
+    .collector-notice button { all: unset; cursor: pointer; flex: none; margin-left: auto; font-weight: 700;
+      padding: 4px 10px; border-radius: var(--radius-pill); color: var(--ink); }
+    .collector-notice button:hover { background: var(--pill-hover); }
     @media (max-width: 1080px) {
       .glance-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .details-grid, .readings-grid { grid-template-columns: 1fr; }
@@ -214,7 +231,7 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
     }
     @media (max-width: 640px) {
       .shell { width: min(100% - 14px, 1500px); padding: 10px 0 24px; }
-      .toolbar, .panel, .card { border-radius: 16px; }
+      .toolbar, .panel, .card { border-radius: 20px; }
       .toolbar { flex-wrap: nowrap; justify-content: flex-start; align-items: center; padding: 6px; gap: 4px; margin: 6px 0 8px; backdrop-filter: none; overflow: visible; }
       .control-group { gap: 4px; width: auto; flex-wrap: nowrap; }
       .filter-cluster { flex: 1 1 auto; min-width: 74px; }
@@ -231,10 +248,10 @@ DATA_HEAD = r"""  <meta name="theme-color" content="#122033" />
       .refresh-cluster #refresh { min-width: 34px; width: 40px; padding-inline: 0; }
       .chart-stack, .grid { gap: 8px; }
       .glance-strip { gap: 7px; margin: 8px 0; }
-      .glance-card { min-height: 66px; padding: 8px 9px; }
+      .glance-card { min-height: 66px; padding: 10px 12px; }
       .glance-card strong { font-size: 1.35rem; margin: 2px 0; }
       .glance-card small { font-size: .75rem; }
-      .chart-panel, .panel, .card { padding: 9px; }
+      .chart-panel, .panel, .card { padding: 12px; }
       .panel-title { gap: 8px; margin-bottom: 5px; align-items: flex-start; }
       .panel-title { flex-wrap: wrap; }
       .primary-chart > .panel-title { flex-wrap: nowrap; align-items: center; }
@@ -396,7 +413,7 @@ DATA_BODY = r"""
             <span class="info-popover-wrap companion-info">
               <button class="info-button" type="button" aria-label="How to read the O₂ trend companion">i</button>
               <span class="info-popover" role="tooltip">
-                O₂ trend companion: a MACD-style oxygen view. It compares recent 30-minute O₂ against the 4-hour baseline. Green means recent O₂ is above baseline; red means below. Offline gaps are not bridged; oxygen challenges stay visible as real readings behind the blue challenge band.
+                O₂ trend companion: a MACD-style oxygen view. It compares recent 30-minute O₂ against the 4-hour baseline. Bars above the zero line (mint/green) mean recent O₂ is above baseline; bars below it (red) mean below. Offline gaps are not bridged; oxygen challenges stay visible as real readings behind the blue challenge band.
               </span>
             </span>
           </div>
@@ -489,21 +506,21 @@ DATA_BODY = r"""
       // Quiet, token-driven chart chrome so the graphs read like the rest of
       // the app: hairline series, faint horizontal grid only, inverted-card
       // tooltips (same treatment as the sleep-strip tooltip).
+      // Colours come only from theme.css; with a token missing Chart.js keeps
+      // its own defaults instead of a second, stale palette living here.
       const styles = getComputedStyle(document.documentElement);
-      const ink = styles.getPropertyValue('--ink').trim() || '#1c1917';
-      const bg = styles.getPropertyValue('--bg').trim() || '#faf7f2';
-      const dim = styles.getPropertyValue('--dim').trim() || '#78716c';
-      const faint = styles.getPropertyValue('--faint').trim() || '#a8a29e';
-      const line = styles.getPropertyValue('--surface-line').trim() || '#e7e0d5';
-      if (window.Chart) {
+      const token = name => styles.getPropertyValue(name).trim();
+      const ink = token('--ink'), bg = token('--bg'), dim = token('--dim'), line = token('--surface-line');
+      if (window.Chart && ink && bg && dim && line) {
         Chart.defaults.color = dim;
         Chart.defaults.borderColor = line;
+        Chart.defaults.font.family = getComputedStyle(document.documentElement).getPropertyValue('--font-sans').trim() || Chart.defaults.font.family;
         Chart.defaults.font.size = 11;
         Chart.defaults.elements.line.borderWidth = 1.7;
         Chart.defaults.elements.line.borderJoinStyle = 'round';
         Chart.defaults.elements.line.borderCapStyle = 'round';
         Chart.defaults.scale.grid.drawTicks = false;
-        Chart.defaults.scale.ticks.color = faint;
+        Chart.defaults.scale.ticks.color = dim;   // small text: --dim, never --faint
         const tooltip = Chart.defaults.plugins.tooltip;
         tooltip.backgroundColor = ink;
         tooltip.titleColor = bg;
@@ -520,19 +537,24 @@ DATA_BODY = r"""
       window.__onThemeChange = () => window.location.reload();
     })();
     window.__pageOwnsAccountSelect = true;
-    const themeToken = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-    // Chart series pull from the shared theme so both skins stay coherent.
+    // Every chart colour is a theme.css token. No palette literals live here:
+    // if a token is ever missing, lines fall back to the page's own text colour
+    // (always readable on the page) and band fills pass 'transparent'.
+    const TOKEN_FALLBACK = getComputedStyle(document.body).color;
+    const CHART_FONT = getComputedStyle(document.documentElement).getPropertyValue('--font-sans').trim() || 'sans-serif';
+    const themeToken = (name, fallback = TOKEN_FALLBACK) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+    // One colour per vital, the same tokens as every other page and the widget.
     const SERIES = {
-      o2: themeToken('--accent', '#6d28d9'),
-      hr: themeToken('--series-hr', '#a21caf'),
-      move: themeToken('--good', '#15803d'),
-      temp: themeToken('--series-temp', '#0f766e'),
-      sleep: themeToken('--sleep-deep', '#5b21b6'),
-      awake: themeToken('--awake', '#f59e0b'),
-      prior: themeToken('--faint', '#a8a29e'),
-      good: themeToken('--good', '#15803d'),
-      bad: themeToken('--bad', '#b91c1c'),
-      warn: themeToken('--warn', '#b45309'),
+      o2: themeToken('--series-o2'),
+      hr: themeToken('--series-hr'),
+      move: themeToken('--series-move'),
+      temp: themeToken('--series-temp'),
+      sleep: themeToken('--sleep-light'),   // a line colour: --sleep-deep is under 3:1 on a dark card
+      awake: themeToken('--awake'),
+      prior: themeToken('--dim'),
+      good: themeToken('--good'),
+      bad: themeToken('--bad'),
+      warn: themeToken('--warn'),
     };
     const seriesAlpha = (color, alpha) => /^#[0-9a-fA-F]{6}$/.test(color) ? color + alpha : color;
     const API_BASE = "__API_BASE__";
@@ -588,19 +610,19 @@ DATA_BODY = r"""
     let applyingAccountPreferences = false;
 
     const sleepPhaseColors = {
-      light: themeToken('--chart-phase-light', 'rgba(124, 58, 237, .21)'),
-      deep: themeToken('--chart-phase-deep', 'rgba(37, 99, 235, .21)'),
-      awake: themeToken('--chart-phase-awake', 'rgba(180, 83, 9, .20)'),
-      inactive: themeToken('--chart-phase-inactive', 'rgba(148, 163, 184, .16)'),
-      offline: themeToken('--chart-phase-offline', 'rgba(100, 116, 139, .18)')
+      light: themeToken('--chart-phase-light', 'transparent'),
+      deep: themeToken('--chart-phase-deep', 'transparent'),
+      awake: themeToken('--chart-phase-awake', 'transparent'),
+      inactive: themeToken('--chart-phase-inactive', 'transparent'),
+      offline: themeToken('--chart-phase-offline', 'transparent')
     };
 
     const stateStripColors = {
-      light: themeToken('--chart-strip-light', 'rgba(124, 58, 237, .72)'),
-      deep: themeToken('--chart-strip-deep', 'rgba(37, 99, 235, .72)'),
-      awake: themeToken('--chart-strip-awake', 'rgba(180, 83, 9, .72)'),
-      inactive: themeToken('--chart-strip-inactive', 'rgba(148, 163, 184, .72)'),
-      offline: themeToken('--chart-strip-offline', 'rgba(100, 116, 139, .48)')
+      light: themeToken('--chart-strip-light'),
+      deep: themeToken('--chart-strip-deep'),
+      awake: themeToken('--chart-strip-awake'),
+      inactive: themeToken('--chart-strip-inactive'),
+      offline: themeToken('--chart-strip-offline')
     };
 
     const PANEL_CANVAS_IDS = ['vitalsChart', 'hrPanelChart', 'spo2PanelChart', 'movePanelChart'];
@@ -611,8 +633,8 @@ DATA_BODY = r"""
         if (!intervals.length || !chart.scales?.x) return;
         const { ctx, chartArea, scales } = chart;
         ctx.save();
-        ctx.fillStyle = themeToken('--chart-offline-fill', 'rgba(100, 116, 139, 0.14)');
-        ctx.strokeStyle = themeToken('--chart-offline-line', 'rgba(100, 116, 139, 0.32)');
+        ctx.fillStyle = themeToken('--chart-offline-fill', 'transparent');
+        ctx.strokeStyle = themeToken('--chart-offline-line');
         intervals.forEach(({ start, end }) => {
           const left = Math.max(chartArea.left, scales.x.getPixelForValue(start));
           const right = Math.min(chartArea.right, scales.x.getPixelForValue(end));
@@ -640,9 +662,9 @@ DATA_BODY = r"""
           ctx.beginPath();
           ctx.rect(left, chartArea.top, width, height);
           ctx.clip();
-          ctx.fillStyle = themeToken('--chart-nodata-fill', 'rgba(148, 163, 184, 0.10)');
+          ctx.fillStyle = themeToken('--chart-nodata-fill', 'transparent');
           ctx.fillRect(left, chartArea.top, width, height);
-          ctx.strokeStyle = themeToken('--chart-nodata-line', 'rgba(100, 116, 139, 0.22)');
+          ctx.strokeStyle = themeToken('--chart-nodata-line');
           ctx.lineWidth = 1;
           for (let x = left - height; x < right; x += 14) {
             ctx.beginPath();
@@ -651,8 +673,8 @@ DATA_BODY = r"""
             ctx.stroke();
           }
           if (width > 78) {
-            ctx.fillStyle = themeToken('--chart-nodata-text', 'rgba(71, 85, 105, 0.78)');
-            ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif';
+            ctx.fillStyle = themeToken('--chart-nodata-text');
+            ctx.font = `600 11px ${CHART_FONT}`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
             ctx.fillText('collector off', (left + right) / 2, chartArea.top + 4);
@@ -670,11 +692,11 @@ DATA_BODY = r"""
         const isTrendCompanion = chart.canvas.id === 'oxygenTrendChart';
         ctx.save();
         ctx.fillStyle = isTrendCompanion
-          ? themeToken('--chart-challenge-fill-trend', 'rgba(37, 99, 235, 0.10)')
-          : themeToken('--chart-challenge-fill', 'rgba(37, 99, 235, 0.13)');
+          ? themeToken('--chart-challenge-fill-trend', 'transparent')
+          : themeToken('--chart-challenge-fill', 'transparent');
         ctx.strokeStyle = isTrendCompanion
-          ? themeToken('--chart-challenge-line-trend', 'rgba(29, 78, 216, 0.78)')
-          : themeToken('--chart-challenge-line', 'rgba(29, 78, 216, 0.62)');
+          ? themeToken('--chart-challenge-line-trend')
+          : themeToken('--chart-challenge-line');
         ctx.lineWidth = isTrendCompanion ? 3 : 2;
         ctx.setLineDash(isTrendCompanion ? [7, 5] : [8, 5]);
         intervals.forEach(({ start, end }) => {
@@ -699,7 +721,7 @@ DATA_BODY = r"""
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = 'bold 12px system-ui, sans-serif';
+        ctx.font = `700 12px ${CHART_FONT}`;
         meta.data.forEach((point, i) => {
           const raw = dataset.data[i];
           if (!raw) return;
@@ -777,7 +799,7 @@ DATA_BODY = r"""
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = SERIES.bad;
-        ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+        ctx.font = `700 12px ${CHART_FONT}`;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
         ctx.fillText(`${critical}% O₂`, chartArea.right - 4, y - 4);
@@ -844,7 +866,7 @@ DATA_BODY = r"""
         const max = Number(scales.x.max);
         if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return;
         ctx.save();
-        ctx.strokeStyle = themeToken('--chart-day-boundary', 'rgba(15, 23, 42, .38)');
+        ctx.strokeStyle = themeToken('--chart-day-boundary');
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 5]);
         dayBoundaryTimes({ min, max }).forEach(time => {
@@ -950,20 +972,26 @@ DATA_BODY = r"""
       const intervals = age / totalMs;
       const mix = (from, to, fade) => Math.round(from + (to - from) * fade);
       // Colours come from theme.css (--live-*), hex only, read on every paint.
-      const liveRgb = (name, fb) => {
+      const liveRgb = name => {
         const m = /^#([0-9a-f]{6})$/i.exec(themeToken(name, ''));
-        const n = parseInt(m ? m[1] : fb, 16);
+        if (!m) return null;
+        const n = parseInt(m[1], 16);
         return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      };
+      // Without the --live-* tokens there is nothing to blend: use the end
+      // colour of the phase straight from CSS, so "stale" still turns --bad.
+      const paint = (from, to, fade, endVar) => {
+        dot.style.backgroundColor = from && to
+          ? `rgb(${mix(from[0], to[0], fade)}, ${mix(from[1], to[1], fade)}, ${mix(from[2], to[2], fade)})`
+          : (fade < .5 ? '' : `var(${endVar})`);
       };
       if (intervals <= 1.5) {
         const fade = intervals / 1.5;
-        const c0 = liveRgb('--live-fresh', '10dc60'), c1 = liveRgb('--live-idle', '94a3b8');
-        dot.style.backgroundColor = `rgb(${mix(c0[0], c1[0], fade)}, ${mix(c0[1], c1[1], fade)}, ${mix(c0[2], c1[2], fade)})`;
+        paint(liveRgb('--live-fresh'), liveRgb('--live-idle'), fade, '--faint');
         dot.title = `Auto-refresh in ${secondsUntilRefresh}s — click to refresh now`;
       } else {
         const fade = Math.min(1, (intervals - 1.5) / 2.5); // fully red by ~4 missed intervals
-        const d0 = liveRgb('--live-idle', '94a3b8'), d1 = liveRgb('--live-stale', 'ef4444');
-        dot.style.backgroundColor = `rgb(${mix(d0[0], d1[0], fade)}, ${mix(d0[1], d1[1], fade)}, ${mix(d0[2], d1[2], fade)})`;
+        paint(liveRgb('--live-idle'), liveRgb('--live-stale'), fade, '--bad');
         dot.title = `No new data for ${Math.round(age / 1000)}s — click to retry`;
       }
     }
@@ -2257,7 +2285,7 @@ DATA_BODY = r"""
     }
 
     function notificationsDataset() {
-      return { id: 'notifications', type: 'scatter', label: 'Notifications', data: notificationPoints(), yAxisID: 'spo2', hidden: preferredDatasetHidden('notifications', false), pointStyle: 'triangle', pointRadius: 9, pointHoverRadius: 13, hitRadius: 24, showLine: false, borderWidth: 2, borderColor: SERIES.warn, backgroundColor: SERIES.awake };
+      return { id: 'notifications', type: 'scatter', label: 'Notifications', data: notificationPoints(), yAxisID: 'spo2', hidden: preferredDatasetHidden('notifications', false), pointStyle: 'triangle', pointRadius: 9, pointHoverRadius: 13, hitRadius: 24, showLine: false, borderWidth: 2, borderColor: SERIES.warn, backgroundColor: seriesAlpha(SERIES.warn, '33') };
     }
 
     function renderCombinedChart() {
@@ -2701,7 +2729,7 @@ DATA_BODY = r"""
       attachStateStripHover();
       if (!range || range.max <= range.min || !readings.length) {
         stateStripSegments = [];
-        el('stateStrip').style.background = themeToken('--nodata', '#f0ece5');
+        el('stateStrip').style.background = themeToken('--nodata');
         el('stateStrip').innerHTML = '';
         el('stateTimeAxis').innerHTML = '';
         return;
@@ -2718,7 +2746,7 @@ DATA_BODY = r"""
         const color = stateStripColors[segment.cls] || stateStripColors.inactive;
         return [`${color} ${Math.max(0, left).toFixed(3)}%`, `${color} ${Math.min(100, right).toFixed(3)}%`];
       });
-      el('stateStrip').style.background = stops.length ? `linear-gradient(to right, ${stops.join(', ')})` : themeToken('--nodata', '#f0ece5');
+      el('stateStrip').style.background = stops.length ? `linear-gradient(to right, ${stops.join(', ')})` : themeToken('--nodata');
       const ticks = timeTickValues(range).map(value => {
         const position = ((value - range.min) / (range.max - range.min)) * 100;
         return `<span style="left:${position}%">${timeTick(value)}</span>`;
@@ -2740,7 +2768,7 @@ DATA_BODY = r"""
         data: {
           datasets: [
             { id: 'o2Trailing30', label: shortLabel, data: shortAvg, borderColor: SERIES.o2, backgroundColor: seriesAlpha(SERIES.o2, '20'), yAxisID: 'oxygen', hidden: preferredDatasetHidden('o2Trailing30', false), tension: .25, pointRadius: 0, spanGaps: false },
-            { id: 'o2Baseline4h', label: `Baseline ${Math.round(longMinutes / 60)}h O₂ avg`, data: longAvg, borderColor: SERIES.sleep, backgroundColor: seriesAlpha(SERIES.sleep, '20'), yAxisID: 'oxygen', hidden: preferredDatasetHidden('o2Baseline4h', false), tension: .25, pointRadius: 0, borderDash: [6, 4], spanGaps: false },
+            { id: 'o2Baseline4h', label: `Baseline ${Math.round(longMinutes / 60)}h O₂ avg`, data: longAvg, borderColor: SERIES.prior, backgroundColor: seriesAlpha(SERIES.prior, '20'), yAxisID: 'oxygen', hidden: preferredDatasetHidden('o2Baseline4h', false), tension: .25, pointRadius: 0, borderDash: [6, 4], spanGaps: false },
             { id: 'o2TrendSignal', type: 'bar', label: signalLabel, data: signal, yAxisID: 'signal', hidden: preferredDatasetHidden('o2TrendSignal', false), backgroundColor: ctx => (ctx.raw?.y ?? 0) >= 0 ? seriesAlpha(SERIES.good, 'f2') : seriesAlpha(SERIES.bad, 'f2'), borderColor: ctx => (ctx.raw?.y ?? 0) >= 0 ? SERIES.good : SERIES.bad, borderWidth: 1, barThickness: isMobileViewport() ? 3 : 4, maxBarThickness: 8, minBarLength: 2 }
           ]
         },
@@ -3096,15 +3124,14 @@ DATA_BODY = r"""
         const health = await fetchJson(`${API_BASE}/api/health`);
         if (!health.desktop_mode) return;
         const banner = document.createElement('div');
-        // Same treatment as .desktop-notice in theme.css — tokens, not a second
-        // hardcoded amber that ignores dark mode.
-        banner.style.cssText = 'background:color-mix(in srgb, var(--awake) 10%, var(--surface));'
-          + 'color:var(--dim);border:1px solid color-mix(in srgb, var(--awake) 45%, transparent);'
-          + 'padding:9px 14px;font-size:13px;'
-          + 'border-radius:var(--radius-control);margin:8px 0;display:flex;justify-content:space-between;gap:12px;align-items:center';
-        banner.innerHTML = '<span>Desktop mode: readings are only collected while this app is running. '
+        // Styled by .collector-notice above: --warn plus a warning glyph and a
+        // bold lead-in, so the caution never rests on colour alone.
+        banner.className = 'collector-notice';
+        banner.setAttribute('role', 'note');
+        banner.innerHTML = '<span class="cn-icon" aria-hidden="true">\u26A0\uFE0E</span>'
+          + '<span><b>Desktop mode:</b> readings are only collected while this app is running. '
           + 'Time it spends closed appears as “collector off” gaps in the charts.</span>'
-          + '<button type="button" aria-label="Dismiss" style="all:unset;cursor:pointer;font-weight:700;padding:4px 8px">✕</button>';
+          + '<button type="button" aria-label="Dismiss">✕</button>';
         banner.querySelector('button').addEventListener('click', () => {
           sessionStorage.setItem('owletDesktopNoticeDismissed', '1');
           banner.remove();

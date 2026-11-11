@@ -12,16 +12,24 @@ from __future__ import annotations
 from app.shell import render_shell
 
 RHYTHMS_HEAD = """<style>
-    h1 { font-family: var(--font-serif);
-      font-size: clamp(34px, 5.4vw, 54px); line-height: 1.06; letter-spacing: -0.015em;
-      font-weight: 600; max-width: 30ch; margin: 0; }
-    h1 em { font-style: italic; color: var(--accent); }
+    /* Page-local steps of the sleep scale and the feed marks. They are built
+       from the shared tokens so both themes follow; candidates for theme.css. */
+    :root {
+      --sleep-faint: color-mix(in srgb, var(--sleep-light) 34%, var(--surface));
+      --sleep-mid: color-mix(in srgb, var(--sleep-light) 50%, var(--sleep-deep));
+      --feed-mark: var(--series-move);
+    }
+    /* headings are bold sans (plan D1.4); the serif is kept for story lines */
+    h1 { font-family: var(--font-sans);
+      font-size: clamp(30px, 4.6vw, 44px); line-height: 1.12; letter-spacing: -0.01em;
+      font-weight: 700; max-width: 30ch; margin: 0; }
+    h1 em { font-style: normal; color: var(--accent); }
     .lede { font-size: 16.5px; line-height: 1.6; color: var(--dim);
       margin: 18px 0 40px; }
     section { margin-bottom: 44px; }
     .acto-card { padding: 22px; overflow-x: auto; }
     table.acto { border-collapse: collapse; width: 100%; min-width: 680px; }
-    table.acto th { font-size: 9.5px; font-weight: 500; color: var(--faint);
+    table.acto th { font-size: 11px; font-weight: 600; color: var(--dim);
       padding: 0 0 8px; text-align: left; }
     table.acto td.day { font-size: 11px; color: var(--dim); padding-right: 12px;
       white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -30,13 +38,13 @@ RHYTHMS_HEAD = """<style>
     tr.ribbon-row td { padding: 0 1px 3px; }
     .o2ribbon { position: relative; height: 3px; }
     .o2ribbon b { position: absolute; top: 0; height: 3px; border-radius: 2px;
-      background: var(--accent); opacity: .55; }
+      background: var(--o2-on); opacity: .8; }
     .acto-legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 12px;
       color: var(--dim); margin-top: 16px; }
     .acto-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px;
       margin-right: 6px; vertical-align: -1px; }
     .acto-legend .rib { display: inline-block; width: 14px; height: 3px; border-radius: 2px;
-      background: var(--accent); opacity: .55; margin-right: 6px; vertical-align: 2px; }
+      background: var(--o2-on); opacity: .8; margin-right: 6px; vertical-align: 2px; }
     .grad { display: inline-flex; vertical-align: -1px; margin-right: 6px; }
     .grad i { width: 11px; height: 11px; margin: 0; border-radius: 0; }
     .grad i:first-child { border-radius: 3px 0 0 3px; }
@@ -49,18 +57,18 @@ RHYTHMS_HEAD = """<style>
     .wear-bars i { display: block; width: 100%; max-width: 34px;
       border-radius: 5px 5px 2px 2px; background: var(--accent-soft);
       border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
-    .wear-bars b { font-size: 10.5px; color: var(--dim); font-weight: 500;
+    .wear-bars b { font-size: 11px; color: var(--dim); font-weight: 600;
       font-variant-numeric: tabular-nums; }
-    .wear-bars span { font-size: 10px; color: var(--faint); white-space: nowrap; }
-    .wear-bars em.dip-floor { font-style: normal; font-size: 9.5px; color: var(--faint);
+    .wear-bars span { font-size: 11px; color: var(--dim); white-space: nowrap; }
+    .wear-bars em.dip-floor { font-style: normal; font-size: 11px; color: var(--dim);
       font-variant-numeric: tabular-nums; white-space: nowrap; }
     .floor-warn { color: var(--warn) !important; font-weight: 700 !important; }
     .floor-bad { color: var(--bad) !important; font-weight: 700 !important; }
 
     /* day-prep vs night pairs */
     .prep-head { display: grid; grid-template-columns: 52px 1fr 1fr; gap: 10px;
-      font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
-      color: var(--faint); margin-top: 12px; }
+      font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+      color: var(--dim); margin-top: 12px; }
     .prep-rows { display: grid; gap: 9px; margin-top: 8px; }
     .prep-row { display: grid; grid-template-columns: 52px 1fr 1fr; gap: 10px;
       align-items: center; font-size: 11px; }
@@ -69,30 +77,31 @@ RHYTHMS_HEAD = """<style>
     .prep-track { position: relative; height: 8px; border-radius: 4px;
       background: color-mix(in srgb, var(--surface-line) 55%, transparent); overflow: hidden; }
     .prep-track i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; }
-    .prep-track.day i { background: color-mix(in srgb, var(--awake) 60%, var(--surface)); }
-    .prep-track.night i { background: var(--accent); opacity: .72; }
-    .prep-val { color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .prep-track.day i { background: var(--awake); }
+    .prep-track.night i { background: var(--sleep-light); }
+    .prep-val { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
     .tile { padding: 20px; }
     .tile h3 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
-      color: var(--faint); font-weight: 700; margin: 0 0 10px; }
-    .tile b { font-size: 27px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+      color: var(--dim); font-weight: 700; margin: 0 0 10px; }
+    .tile b { font-size: 28px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
     .tile b small { font-size: 14px; color: var(--dim); font-weight: 500; }
     .tile p { font-size: 13px; color: var(--dim); line-height: 1.5; margin-top: 8px; }
     .tile .delta { font-size: 13px; font-weight: 600; margin-left: 8px; }
-    .delta.up { color: var(--good); } .delta.down { color: var(--warn); } .delta.flat { color: var(--faint); }
+    .delta.up { color: var(--good); } .delta.down { color: var(--warn); } .delta.flat { color: var(--dim); }
 
     /* drift band */
     .drift-wrap { position: relative; margin-top: 12px; }
     .drift-wrap svg { display: block; width: 100%; height: 104px; }
-    .drift-band { fill: var(--accent-soft); stroke: none; }
-    .drift-line { fill: none; stroke: var(--accent); stroke-width: 1.7;
+    /* both drift charts plot SpO2, so they take the oxygen series colour */
+    .drift-band { fill: color-mix(in srgb, var(--series-o2) 14%, transparent); stroke: none; }
+    .drift-line { fill: none; stroke: var(--series-o2); stroke-width: 1.7;
       vector-effect: non-scaling-stroke; stroke-linejoin: round; }
-    .drift-hair { stroke: var(--faint); stroke-width: 1; stroke-dasharray: 3 4;
+    .drift-hair { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 4;
       vector-effect: non-scaling-stroke; }
-    .drift-ylab { position: absolute; right: 3px; font-size: 10px; color: var(--faint);
+    .drift-ylab { position: absolute; right: 3px; font-size: 11px; color: var(--dim);
       font-variant-numeric: tabular-nums; pointer-events: none; }
-    .drift-axis { display: flex; justify-content: space-between; color: var(--faint);
-      font-size: 10.5px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+    .drift-axis { display: flex; justify-content: space-between; color: var(--dim);
+      font-size: 11px; margin-top: 5px; font-variant-numeric: tabular-nums; }
 
     /* deep-sleep gap dumbbells */
     .gap-rows { display: grid; gap: 9px; margin-top: 12px; }
@@ -102,7 +111,7 @@ RHYTHMS_HEAD = """<style>
     .gap-track { position: relative; height: 14px; }
     .gap-track::before { content: ''; position: absolute; left: 0; right: 0; top: 6.5px;
       height: 1px; background: var(--surface-line); }
-    .gap-line { position: absolute; top: 6px; height: 2px; background: var(--faint);
+    .gap-line { position: absolute; top: 6px; height: 2px; background: var(--dim);
       opacity: .6; border-radius: 1px; }
     .gap-dot { position: absolute; top: 3px; width: 8px; height: 8px; border-radius: 50%;
       transform: translateX(-50%); }
@@ -132,7 +141,7 @@ RHYTHMS_HEAD = """<style>
     .ledger-track i { display: block; height: 10px; border-radius: 5px;
       background: var(--accent-soft);
       border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
-    .ledger-meta { grid-column: 2; color: var(--faint); font-size: 10.5px;
+    .ledger-meta { grid-column: 2; color: var(--dim); font-size: 11px;
       font-variant-numeric: tabular-nums; }
     .ledger-meta em { font-style: normal; font-weight: 700; }
     .ledger-meta em.up { color: var(--good); }
@@ -143,23 +152,25 @@ RHYTHMS_HEAD = """<style>
     .feedmap-row { display: grid; grid-template-columns: 52px 1fr 56px; gap: 10px;
       align-items: center; }
     .feedmap-row svg { display: block; width: 100%; height: 20px; }
-    .feedmap-head { margin-top: 10px; color: var(--faint); }
-    .feedmap-day { font-size: 10.5px; color: var(--dim); white-space: nowrap;
+    .feedmap-head { margin-top: 10px; color: var(--dim); }
+    .feedmap-day { font-size: 11px; color: var(--dim); white-space: nowrap;
       font-variant-numeric: tabular-nums; }
     .feedmap-total { font-size: 11px; text-align: right; font-variant-numeric: tabular-nums;
       color: var(--dim); font-weight: 600; }
     .fs-track { stroke: var(--surface-line); stroke-width: 1.2; }
-    .fm-bottle { fill: var(--accent); opacity: .85; }
-    .fm-nurse { fill: none; stroke: var(--accent); stroke-width: 1.8; }
-    .fm-solid { fill: var(--awake); opacity: .9; }
+    /* feeds are not a vital: one neutral mark colour, told apart by shape
+       (filled dot = bottle, ring = nursing, square = solids) */
+    .fm-bottle { fill: var(--feed-mark); }
+    .fm-nurse { fill: none; stroke: var(--feed-mark); stroke-width: 1.8; }
+    .fm-solid { fill: var(--dim); }
     .empty { text-align: center; color: var(--dim); padding: 60px 20px; font-size: 15px;
       border: 1px dashed var(--surface-line); border-radius: var(--radius-card); }
     /* sleep scale + cell colors come straight from theme tokens */
   </style>"""
 
 RHYTHMS_BODY = """<h1 id="title">The shape of <em>the days</em></h1>
-    <p class="lede" id="lede">Every row is a day, every column a half-hour. Purple is sleep
-      (darker = deeper), amber is awake, blank is no signal. Over weeks, a rhythm emerges —
+    <p class="lede" id="lede">Every row is a day, every column a half-hour. Indigo is sleep
+      (stronger = deeper), dusty rose is awake, blank is no signal. Over weeks, a rhythm emerges —
       this page is where you watch it happen.</p>
     <div id="content"></div>"""
 
@@ -208,9 +219,9 @@ RHYTHMS_SCRIPTS = """<script>
       if (awake > sleep) return 'var(--awake)';
       const fraction = sleep / BUCKET_SEC;
       if (fraction > .85) return 'var(--sleep-deep)';
-      if (fraction > .6) return 'var(--accent)';
+      if (fraction > .6) return 'var(--sleep-mid)';
       if (fraction > .3) return 'var(--sleep-light)';
-      return 'var(--accent-soft)';
+      return 'var(--sleep-faint)';
     }
 
     function cellTitle(day, col, row) {
@@ -273,7 +284,7 @@ RHYTHMS_SCRIPTS = """<script>
       return section('Two weeks, half-hour by half-hour',
         `<div class="acto-card card">${actogramTable(days, ivs, cellColor, cellTitle)}
         <div class="acto-legend">
-          <span><span class="grad"><i style="background:var(--accent-soft)"></i><i style="background:var(--sleep-light)"></i><i style="background:var(--accent)"></i><i style="background:var(--sleep-deep)"></i></span>Sleep (light → deep)</span>
+          <span><span class="grad"><i style="background:var(--sleep-faint)"></i><i style="background:var(--sleep-light)"></i><i style="background:var(--sleep-mid)"></i><i style="background:var(--sleep-deep)"></i></span>Sleep (light → deep)</span>
           <span><i style="background:var(--awake)"></i>Awake</span>
           <span><i style="background:var(--nodata)"></i>No signal</span>
           ${ivs.length ? RIBBON_LEGEND : ''}
@@ -582,7 +593,7 @@ RHYTHMS_SCRIPTS = """<script>
       return section('Deep-sleep O₂ gap',
         `<div class="tile card"><h3>Awake vs deep sleep, per night</h3>
         <div class="gap-rows">${rows}</div>
-        <p>Amber dot = median SpO₂ while awake, violet = in deep sleep; the number is the difference. ${note}</p></div>`);
+        <p>Rose dot = median SpO₂ while awake, indigo = in deep sleep; the number is the difference. ${note}</p></div>`);
     }
 
     // ----- #5: on-O₂ vs off-O₂ report -------------------------------------------
@@ -618,7 +629,7 @@ RHYTHMS_SCRIPTS = """<script>
       };
       return section('On oxygen vs off',
         `<div class="report-grid">${column('On supplemental O₂', groups.on)}${column('Off O₂', groups.off)}</div>
-        <p class="lede" style="font-size:13px; margin:10px 2px 0; color:var(--faint)">Computed from your logged O₂ on/off events over the last two weeks — the comparison to bring to the next appointment.</p>`);
+        <p class="lede" style="font-size:13px; margin:10px 2px 0; color:var(--dim)">Computed from your logged O₂ on/off events over the last two weeks — the comparison to bring to the next appointment.</p>`);
     }
 
     // ----- feed rhythm: the Huckleberry view — when and how much, day by day ----
@@ -845,7 +856,7 @@ RHYTHMS_SCRIPTS = """<script>
         <p>Average SpO₂ across the whole week, day and night.</p></div>`);
       const heading = provisional ? 'What the pattern says — so far' : 'What the pattern says';
       const caveat = provisional
-        ? `<p class="lede" style="font-size:13px; margin:0 0 14px; color:var(--faint)">Only ${nights.length} night${nights.length === 1 ? '' : 's'} of data — these numbers firm up after a full week.</p>`
+        ? `<p class="lede" style="font-size:13px; margin:0 0 14px; color:var(--dim)">Only ${nights.length} night${nights.length === 1 ? '' : 's'} of data — these numbers firm up after a full week.</p>`
         : '';
       return section(heading, caveat + `<div class="tiles">${tiles.join('')}</div>`);
     }

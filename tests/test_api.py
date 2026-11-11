@@ -584,7 +584,7 @@ async def test_dashboard_endpoint_serves_html(tmp_path):
     assert 'rel="apple-touch-icon" sizes="180x180" href="/icon-180.png"' in response.text
     assert "serviceWorker" in response.text
     assert "offlineBands" in response.text
-    assert "rgba(100, 116, 139, 0.14)" in response.text
+    assert "themeToken('--chart-offline-fill', 'transparent')" in response.text
     assert "Device offline / sock off" in response.text
     assert "row?.sock_disconnected" in response.text
     assert "row?.sock_off" in response.text
@@ -753,7 +753,7 @@ async def test_dashboard_endpoint_serves_html(tmp_path):
     assert "challengeBands" in response.text
     assert "beforeDraw(chart, _args, options)" in response.text
     assert "const isTrendCompanion = chart.canvas.id === 'oxygenTrendChart'" in response.text
-    assert "rgba(37, 99, 235, 0.10)" in response.text
+    assert "themeToken('--chart-challenge-fill-trend', 'transparent')" in response.text
     assert "ctx.setLineDash(isTrendCompanion ? [7, 5] : [8, 5])" in response.text
     assert "ctx.strokeRect(left, chartArea.top + 1" in response.text
     assert "seriesAlpha(SERIES.good, 'f2')" in response.text

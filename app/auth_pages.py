@@ -2,6 +2,83 @@ from __future__ import annotations
 
 import html
 
+from app.shell import THEME_RESOLVER
+
+# These pages are standalone: they do not load theme.css (it is the signed-in
+# app's sheet), so they carry a small local copy of the night-sky palette and
+# the bundled fonts. Values mirror theme.css (plan v0.2 section 7 D2); keep the two
+# in step. Dark is the default; THEME_RESOLVER (the app's own) sets
+# data-theme from the theme saved on this device, else the system setting, so
+# sign-in looks like the app the visitor is about to land in.
+_TOKENS = """
+    @font-face { font-family: 'Source Sans 3'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/source-sans-3-latin-400-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Source Sans 3'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/source-sans-3-latin-600-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Source Sans 3'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/source-sans-3-latin-700-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/source-serif-4-latin-400-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/source-serif-4-latin-600-normal.woff2') format('woff2'); }
+    :root, :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg:#070925; --bg-accent-1:#1c2052; --bg-accent-2:#1a1d52;
+      --surface:#121442; --surface-inset:#0c0e33; --surface-line:rgba(190,195,255,.13);
+      --ink:#e7e7fb; --dim:#a9acd9;
+      --accent:#9be3c9; --accent-soft:rgba(155,227,201,.13); --on-accent:#0b0d33;
+      --warn:#ffcf66; --bad:#ff7b7b;
+      --star-bright:#e7e7fb; --star-dim:#c9ccff; --sky-display:block;
+      --radius-card:28px; --radius-control:999px; --radius-field:14px;
+      --font-sans:'Source Sans 3',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+      --font-serif:'Source Serif 4','Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg:#f1f0fb; --bg-accent-1:#dfdcf7; --bg-accent-2:#e9e7f8;
+      --surface:#ffffff; --surface-inset:#f4f3fc; --surface-line:rgba(40,44,110,.12);
+      --ink:#1b1d4d; --dim:#555a8c;
+      --accent:#167a5c; --accent-soft:rgba(22,122,92,.1); --on-accent:#ffffff;
+      --warn:#955800; --bad:#c8322f;
+      --star-bright:#a7a3de; --star-dim:#c4c1ea; --sky-display:none;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:var(--font-sans); color:var(--ink);
+      background:radial-gradient(900px 420px at 50% 60px, var(--bg-accent-1), transparent 70%) no-repeat, var(--bg); }
+    /* a few stars near the top, dark only; static, drawn for this project */
+    body::before { content:''; display:var(--sky-display, none); position:absolute; top:0; left:0; right:0;
+      height:420px; z-index:-1; pointer-events:none;
+      background-image:
+        radial-gradient(1.2px 1.2px at 6% 44px, var(--star-bright) 50%, transparent 51%),
+        radial-gradient(1px 1px at 15% 190px, var(--star-dim) 50%, transparent 51%),
+        radial-gradient(1.5px 1.5px at 27% 96px, var(--star-dim) 50%, transparent 51%),
+        radial-gradient(1px 1px at 39% 28px, var(--star-bright) 50%, transparent 51%),
+        radial-gradient(1px 1px at 48% 250px, var(--star-dim) 50%, transparent 51%),
+        radial-gradient(1.2px 1.2px at 58% 70px, var(--star-dim) 50%, transparent 51%),
+        radial-gradient(1px 1px at 69% 170px, var(--star-bright) 50%, transparent 51%),
+        radial-gradient(1.5px 1.5px at 78% 38px, var(--star-dim) 50%, transparent 51%),
+        radial-gradient(1px 1px at 88% 220px, var(--star-dim) 50%, transparent 51%),
+        radial-gradient(1.2px 1.2px at 95% 88px, var(--star-bright) 50%, transparent 51%);
+      -webkit-mask-image:linear-gradient(#000 45%, transparent); mask-image:linear-gradient(#000 45%, transparent); }
+    label { display:block; font-size:13.5px; font-weight:600; margin:14px 0 6px; }
+    /* 16px minimum stops mobile Safari's forced zoom-on-focus */
+    input, select { width:100%; padding:12px 18px; border:1px solid var(--surface-line);
+      border-radius:var(--radius-control); font:inherit; font-size:16px;
+      background:var(--surface-inset); color:var(--ink); }
+    input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+      outline:2px solid var(--accent); outline-offset:2px; }
+    /* keep browser autofill on the theme instead of its pale default */
+    input:-webkit-autofill { -webkit-text-fill-color:var(--ink);
+      box-shadow:0 0 0 1000px var(--surface-inset) inset; caret-color:var(--ink); }
+    button { width:100%; padding:13px 18px; border:0; border-radius:var(--radius-control);
+      background:var(--accent); color:var(--on-accent); font:inherit; font-size:15.5px; font-weight:700;
+      cursor:pointer; }
+    button:hover { filter:brightness(1.07); }
+    button[disabled] { opacity:.6; cursor:default; }
+    a { color:var(--accent); }
+    /* errors: red edge and tint, plus a warning glyph so colour is not the only signal */
+    .notice { display:flex; gap:10px; align-items:flex-start; color:var(--ink);
+      background:color-mix(in srgb, var(--bad) 13%, var(--surface));
+      border-left:4px solid var(--bad); border-radius:var(--radius-field);
+      padding:10px 14px; font-size:14px; line-height:1.45; margin-bottom:10px; }
+    .notice::before { content:'\\26A0\\FE0E'; color:var(--bad); font-weight:700; flex:none; }
+"""
+
 _BASE = """<!doctype html>
 <html lang="en">
 <head>
@@ -9,30 +86,22 @@ _BASE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{title} · Owlet Dashboard</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
-  <style>
-    :root {{ --bg:#f5f7fb; --panel:#fff; --text:#122033; --muted:#5b6b80; --purple:#6d28d9;
-             --purple-hover:#5b21b6; --input-line:#d6dee9; --input-bg:#fbfcfe;
-             --notice-bg:#fef2f2; --notice-ink:#991b1b; --on-accent:#fff;
-             --shadow-card:0 8px 30px rgba(18,32,51,.08); --shadow-panel:0 12px 34px rgba(18,32,51,.08);
-             --radius-control:10px;
-             --font-sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }}
-    * {{ box-sizing:border-box; }}
-    body {{ margin:0; font-family:var(--font-sans);
-           background:var(--bg); color:var(--text); display:flex; min-height:100vh;
-           align-items:center; justify-content:center; padding:24px; }}
-    .card {{ background:var(--panel); border-radius:16px; box-shadow:var(--shadow-card);
-            padding:32px; width:100%; max-width:420px; }}
-    h1 {{ margin:0 0 4px; font-size:24px; }}
-    p.sub {{ margin:0 0 20px; color:var(--muted); font-size:14px; }}
-    label {{ display:block; font-size:13px; font-weight:600; margin:14px 0 4px; }}
-    /* 16px minimum stops mobile Safari's forced zoom-on-focus */
-    input, select {{ width:100%; padding:10px 12px; border:1px solid var(--input-line); border-radius:var(--radius-control); font-size:16px; }}
-    button {{ margin-top:18px; width:100%; padding:11px; border:0; border-radius:var(--radius-control);
-             background:var(--purple); color:var(--on-accent); font-size:15px; font-weight:600; cursor:pointer; }}
-    .links {{ margin-top:16px; font-size:13px; color:var(--muted); display:flex; justify-content:space-between; }}
-    .links a {{ color:var(--purple); text-decoration:none; }}
-    .notice {{ background:var(--notice-bg); color:var(--notice-ink); border-radius:var(--radius-control); padding:10px 12px; font-size:13px; margin-bottom:8px; }}
-    footer {{ margin-top:20px; font-size:11px; color:var(--muted); text-align:center; }}
+  {resolver}
+  <style>{tokens}
+    body {{ display:flex; min-height:100vh; align-items:center; justify-content:center; padding:24px 16px; }}
+    .card {{ background:var(--surface); border-radius:var(--radius-card);
+            padding:36px 32px 28px; width:100%; max-width:440px; }}
+    h1 {{ margin:0 0 6px; font-size:28px; font-weight:700; line-height:1.15; }}
+    p.sub {{ margin:0 0 20px; color:var(--dim); font-size:15px; line-height:1.5; }}
+    p.sub strong {{ color:var(--ink); font-weight:600; }}
+    form > button {{ margin-top:22px; }}
+    .links {{ margin-top:16px; font-size:14px; color:var(--dim); display:flex; justify-content:space-between; align-items:center; }}
+    .links a {{ font-weight:600; text-decoration:none; }}
+    .links button.quiet {{ background:none; color:var(--dim); margin:0; padding:12px 10px; width:auto;
+            min-height:44px; font-size:14px; font-weight:600; }}
+    .links button.quiet:hover {{ color:var(--ink); filter:none; }}
+    footer {{ margin-top:22px; font-size:12px; line-height:1.5; color:var(--dim); text-align:center; }}
+    @media (max-width: 420px) {{ .card {{ padding:28px 20px 22px; }} }}
   </style>
 </head>
 <body>
@@ -45,7 +114,7 @@ _BASE = """<!doctype html>
 
 
 def _page(title: str, body: str) -> str:
-    return _BASE.format(title=html.escape(title), body=body)
+    return _BASE.format(title=html.escape(title), body=body, tokens=_TOKENS, resolver=THEME_RESOLVER)
 
 
 def _error(error: str | None) -> str:
@@ -60,8 +129,9 @@ def desktop_redirect_page(url: str) -> str:
     return (
         f'<!doctype html><meta charset="utf-8">'
         f'<meta http-equiv="refresh" content="0; url={safe}">'
+        f'{THEME_RESOLVER}<style>{_TOKENS}</style>'
         f'<script>location.replace({html.escape(_json_str(url))})</script>'
-        f'<p style="font:15px system-ui;padding:24px;color:#5b6b80">Connecting to {safe}…</p>'
+        f'<p style="font-size:15px;padding:24px;color:var(--dim)">Connecting to {safe}…</p>'
     )
 
 
@@ -79,7 +149,8 @@ def desktop_launcher_page(current_backend: str | None = None, error: str | None 
             f'<b>{html.escape(current_backend)}</b>.</p>'
         )
     prefill = html.escape(current_backend or "", quote=True)
-    return _LAUNCHER.format(error=_error(error), change=change, prefill=prefill)
+    return _LAUNCHER.format(error=_error(error), change=change, prefill=prefill,
+                            tokens=_TOKENS, resolver=THEME_RESOLVER)
 
 
 _LAUNCHER = """<!doctype html>
@@ -89,42 +160,27 @@ _LAUNCHER = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Owlet Dashboard — get started</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
-  <style>
-    :root {{ --bg:#f5f7fb; --panel:#fff; --text:#122033; --muted:#5b6b80; --purple:#6d28d9;
-             --purple-soft:#ede9fe; --line:#e3e9f2;
-             --purple-hover:#5b21b6; --input-line:#d6dee9; --input-bg:#fbfcfe;
-             --notice-bg:#fef2f2; --notice-ink:#991b1b; --on-accent:#fff;
-             --shadow-panel:0 12px 34px rgba(18,32,51,.08);
-             --radius-control:10px;
-             --font-sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }}
-    * {{ box-sizing:border-box; margin:0; }}
-    body {{ font-family:var(--font-sans);
-      background:radial-gradient(1100px 500px at 15% -10%, var(--purple-soft), transparent 60%), var(--bg);
-      color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px 20px; }}
+  {resolver}
+  <style>{tokens}
+    h1, h2, p {{ margin:0; }}
+    body {{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px 16px; }}
     .wrap {{ width:100%; max-width:640px; }}
     .brand {{ display:flex; align-items:center; gap:12px; margin-bottom:8px; }}
-    .brand img {{ width:40px; height:40px; }}
-    .brand span {{ font-size:19px; font-weight:700; letter-spacing:-.02em; }}
-    h1 {{ font-size:26px; letter-spacing:-.02em; margin:14px 0 6px; }}
-    .lede {{ color:var(--muted); font-size:15px; line-height:1.55; margin-bottom:22px; }}
-    .opt {{ background:var(--panel); border:1px solid var(--line); border-radius:16px;
-      box-shadow:var(--shadow-panel); padding:20px 22px; margin-bottom:16px; }}
-    .opt h2 {{ font-size:17px; margin-bottom:4px; }}
-    .opt p {{ color:var(--muted); font-size:13.5px; line-height:1.5; margin-bottom:14px; }}
-    .opt.primary {{ border:1.5px solid var(--purple); }}
-    input {{ width:100%; padding:11px 12px; border:1px solid var(--input-line); border-radius:var(--radius-control);
-      font-size:16px; background:var(--input-bg); margin-bottom:10px; }}
-    input:focus {{ outline:2px solid var(--purple); outline-offset:1px; border-color:transparent; }}
-    button {{ width:100%; padding:12px; border:0; border-radius:var(--radius-control); background:var(--purple);
-      color:var(--on-accent); font-size:15px; font-weight:600; cursor:pointer; }}
-    button:hover {{ background:var(--purple-hover); }}
-    button.ghost {{ background:transparent; color:var(--purple); border:1px solid var(--line); }}
-    button.ghost:hover {{ background:var(--purple-soft); }}
-    button[disabled] {{ opacity:.6; cursor:default; }}
-    .alt {{ font-size:13px; color:var(--muted); margin-top:8px; text-align:center; }}
-    .notice {{ background:var(--notice-bg); color:var(--notice-ink); border-radius:var(--radius-control); padding:10px 12px;
-      font-size:13px; margin-bottom:10px; }}
-    footer {{ text-align:center; font-size:11.5px; color:var(--muted); margin-top:14px; }}
+    .brand img {{ width:40px; height:40px; border-radius:12px; }}
+    .brand span {{ font-size:19px; font-weight:700; letter-spacing:-.01em; }}
+    h1 {{ font-size:30px; font-weight:700; line-height:1.15; margin:16px 0 6px; }}
+    .lede {{ color:var(--dim); font-size:16px; line-height:1.55; margin-bottom:22px; }}
+    .opt {{ background:var(--surface); border-radius:var(--radius-card); padding:24px 26px; margin-bottom:16px; }}
+    .opt h2 {{ font-size:19px; font-weight:700; margin-bottom:4px; }}
+    .opt p {{ color:var(--dim); font-size:14.5px; line-height:1.5; margin-bottom:14px; }}
+    /* the suggested choice is named in words; the other option's button is quieter */
+    .opt .tag {{ display:inline-block; margin-bottom:8px; padding:3px 10px; border-radius:var(--radius-control);
+      background:var(--accent-soft); color:var(--accent); font-size:12.5px; font-weight:700; }}
+    input {{ margin-bottom:10px; }}
+    button.ghost {{ background:var(--bg-accent-2); color:var(--ink); }}
+    .alt {{ font-size:14px; color:var(--dim); margin-top:8px; text-align:center; }}
+    .alt b {{ color:var(--ink); }}
+    footer {{ text-align:center; font-size:12.5px; color:var(--dim); margin-top:14px; }}
   </style>
 </head>
 <body>
@@ -135,6 +191,7 @@ _LAUNCHER = """<!doctype html>
       this PC.</p>
     {error}
     <div class="opt primary">
+      <span class="tag">Recommended</span>
       <h2>Connect to a live server</h2>
       <p>Best if you run the Docker/Unraid version somewhere always-on. This window becomes a
         viewer for it — real 24/7 history, nothing lost when this PC sleeps, and a normal login.</p>
@@ -172,80 +229,51 @@ _LANDING = """<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#0b1023" />
+  <meta name="theme-color" content="#070925" />
   <title>Owlet Dashboard — every night, remembered</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
-  <style>
-    /* Split screen: the story lives on a night-coloured panel (the app's own
-       Tonight palette), the sign-in gets an uncontested half of the page. */
-    :root {{
-      --night:#0b1023; --night-2:#232b5c; --ink-dark:#e8ecf8; --dim-dark:#9aa3c8;
-      --line-dark:rgba(139,148,184,.28); --indigo:#a5b4fc; --accent:#4f46e5;
-      --paper:#faf7f2; --ink:#1c1917; --dim:#78716c; --faint:#a8a29e; --line:#e7e0d5;
-      --brand-ink:#c7cdf0; --accent-hover:#4338ca; --field-bg:#fff; --on-accent:#fff;
-      --notice-bg:#fef2f2; --notice-ink:#991b1b; --muted:#5b6b80;
-      --shadow-shot:0 -10px 80px rgba(129,140,248,.22);
-      --radius-control:10px;
-      --font-sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      --font-serif:ui-serif,Georgia,'Times New Roman',serif;
-    }}
-    * {{ box-sizing:border-box; margin:0; }}
-    body {{
-      font-family:var(--font-sans); color:var(--ink);
-      min-height:100vh; display:grid; grid-template-columns:1.08fr .92fr;
-    }}
+  {resolver}
+  <style>{tokens}
+    /* Split screen on one sky: the story on the left, the sign-in card on the
+       right. Night sky by default, morning sky in light. */
+    h1, h2, p {{ margin:0; }}
+    body {{ min-height:100vh; display:grid; grid-template-columns:1.08fr .92fr; }}
     /* ---- left: the pitch ------------------------------------------------ */
-    .story {{
-      background:radial-gradient(900px 600px at 20% -10%, var(--night-2) 0%, transparent 60%),
-                 var(--night);
-      color:var(--ink-dark); padding:52px 56px 0;
-      display:flex; flex-direction:column; overflow:hidden;
-    }}
+    .story {{ padding:52px 56px 0; display:flex; flex-direction:column; overflow:hidden; }}
     .brand {{ display:flex; align-items:center; gap:11px; margin-bottom:40px; }}
-    .brand img {{ width:32px; height:32px; border-radius:8px; }}
-    .brand span {{ font-size:14.5px; font-weight:650; color:var(--brand-ink); letter-spacing:.01em; }}
-    /* A system serif — editorial voice with no webfont to download, which
-       keeps the self-hosted/offline story intact. */
+    .brand img {{ width:32px; height:32px; border-radius:10px; }}
+    .brand span {{ font-size:17px; font-weight:700; letter-spacing:-.01em; }}
+    /* the one-line story takes the serif (plan D1.4); everything else is sans */
     h1 {{
-      font-family:var(--font-serif); font-weight:500;
-      font-size:clamp(32px,3.5vw,48px); line-height:1.05; letter-spacing:-.025em;
+      font-family:var(--font-serif); font-weight:600;
+      font-size:clamp(34px,3.6vw,50px); line-height:1.08; letter-spacing:-.015em;
       max-width:13ch; margin-bottom:16px;
     }}
-    h1 em {{ font-style:italic; color:var(--indigo); }}
-    .lede {{ color:var(--dim-dark); font-size:16px; line-height:1.6; max-width:44ch;
-            margin-bottom:24px; }}
+    h1 em {{ font-style:normal; color:var(--accent); }}
+    .lede {{ color:var(--dim); font-size:17px; line-height:1.6; max-width:44ch; margin-bottom:24px; }}
     .pills {{ display:flex; flex-wrap:wrap; gap:8px; }}
-    .pills span {{ font-size:12.5px; color:var(--brand-ink); border:1px solid var(--line-dark);
-                  padding:6px 12px; border-radius:999px; }}
-    /* the phone runs off the bottom edge — implies there is more below */
-    .shot {{ margin:38px auto -2px; width:min(300px,78%); }}
-    .shot img {{ width:100%; height:auto; display:block; border-radius:22px 22px 0 0;
-                border:1px solid var(--line-dark); border-bottom:0;
-                box-shadow:var(--shadow-shot); }}
+    .pills span {{ font-size:14px; font-weight:600; color:var(--ink); background:var(--surface);
+                  padding:7px 14px; border-radius:var(--radius-control); }}
+    /* The preview sits in a soft card-coloured frame and runs off the bottom
+       edge: implies there is more below. */
+    .shot {{ margin:38px auto -2px; width:min(320px,80%); padding:10px 10px 0;
+            background:var(--surface); border-radius:36px 36px 0 0; }}
+    .shot img {{ width:100%; height:auto; display:block; border-radius:var(--radius-card) var(--radius-card) 0 0; }}
     /* ---- right: sign in -------------------------------------------------- */
-    .signin {{ background:var(--paper); display:flex; align-items:center;
-              justify-content:center; padding:48px 44px; }}
-    .panel {{ width:100%; max-width:352px; }}
-    .panel h2 {{ font-size:26px; letter-spacing:-.02em; margin-bottom:5px; }}
-    .panel p.sub {{ color:var(--dim); font-size:14px; line-height:1.5; margin-bottom:18px; }}
-    label {{ display:block; font-size:12.5px; font-weight:650; margin:14px 0 5px; }}
-    /* 16px minimum stops mobile Safari's forced zoom-on-focus */
-    input {{ width:100%; padding:12px; border:1px solid var(--line); border-radius:11px;
-            font-size:16px; background:var(--field-bg); }}
-    input:focus {{ outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }}
-    button {{ margin-top:20px; width:100%; padding:13px; border:0; border-radius:11px;
-             background:var(--accent); color:var(--on-accent); font-size:15px; font-weight:650;
-             cursor:pointer; }}
-    button:hover {{ background:var(--accent-hover); }}
-    .alt {{ margin-top:14px; font-size:13px; color:var(--dim); text-align:center; }}
-    .alt a {{ color:var(--accent); font-weight:650; text-decoration:none; }}
-    .notice {{ background:var(--notice-bg); color:var(--notice-ink); border-radius:var(--radius-control); padding:10px 12px;
-              font-size:13px; margin-bottom:6px; }}
-    .fine {{ margin-top:28px; padding-top:18px; border-top:1px solid var(--line);
-            font-size:11.5px; color:var(--faint); line-height:1.55; }}
-    .fine a {{ color:var(--dim); font-weight:600; }}
+    .signin {{ display:flex; align-items:center; justify-content:center; padding:48px 44px; }}
+    .panel {{ width:100%; max-width:420px; background:var(--surface);
+             border-radius:var(--radius-card); padding:36px 34px 30px; }}
+    .panel h2 {{ font-size:30px; font-weight:700; line-height:1.15; margin-bottom:6px; }}
+    .panel p.sub {{ color:var(--dim); font-size:15px; line-height:1.5; margin-bottom:18px; }}
+    .panel p.sub b {{ color:var(--ink); }}
+    form > button {{ margin-top:22px; }}
+    .alt {{ margin-top:16px; font-size:14.5px; color:var(--dim); text-align:center; }}
+    .alt a {{ font-weight:700; text-decoration:none; }}
+    .fine {{ margin-top:26px; padding-top:18px; border-top:1px solid var(--surface-line);
+            font-size:12.5px; color:var(--dim); line-height:1.55; }}
+    .fine a {{ font-weight:600; }}
     .fine p + p {{ margin-top:7px; }}
-    /* Side by side, the split owns exactly one screen: the phone clips at the
+    /* Side by side, the split owns exactly one screen: the preview clips at the
        bottom edge instead of stretching the page into a scroll. The sign-in
        half scrolls on its own so a short laptop can still reach the button. */
     @media (min-width: 901px) {{
@@ -255,16 +283,17 @@ _LANDING = """<!doctype html>
     }}
     /* ---- stacked ---------------------------------------------------------- */
     @media (max-width: 900px) {{
-      body {{ grid-template-columns:1fr; }}
-      .story {{ padding:34px 26px 0; }}
+      body {{ grid-template-columns:minmax(0,1fr); }}
+      .story {{ padding:34px 20px 0; }}
       .brand {{ margin-bottom:26px; }}
       h1 {{ max-width:none; }}
-      /* On a phone the mockup earns less than the ~550px of scroll it costs
-         before the sign-in form — show the top of the Today view as a peek. */
-      .shot {{ margin:26px auto 0; width:min(240px,66%); max-height:210px;
-              overflow:hidden; border-radius:18px 18px 0 0; }}
-      .signin {{ padding:34px 26px 40px; }}
-      .panel {{ max-width:420px; }}
+      /* On a phone the preview earns less than the ~550px of scroll it costs
+         before the sign-in form: show the top of the Today view as a peek. */
+      .shot {{ margin:26px auto 0; width:min(250px,70%); max-height:210px; overflow:hidden;
+              padding:8px 8px 0; border-radius:var(--radius-card) var(--radius-card) 0 0; }}
+      .shot img {{ border-radius:20px 20px 0 0; }}
+      .signin {{ padding:24px 16px 40px; }}
+      .panel {{ padding:28px 22px 24px; }}
     }}
   </style>
 </head>
@@ -350,6 +379,8 @@ def login_page(error: str | None = None, desktop_mode: bool = False) -> str:
         signin_sub=signin_sub,
         signup_line=signup_line,
         email_label=email_label,
+        tokens=_TOKENS,
+        resolver=THEME_RESOLVER,
     )
 
 
@@ -397,6 +428,6 @@ def onboarding_page(error: str | None = None, desktop_mode: bool = False) -> str
       <button type="submit">Link sock and start collecting</button>
     </form>
     <div class="links"><span></span><form method="post" action="/auth/logout" style="margin:0">
-      <button type="submit" style="background:none;color:var(--muted);margin:0;padding:12px 10px;width:auto;min-height:44px;font-size:13px">
+      <button type="submit" class="quiet">
         Sign out</button></form></div>""",
     )
