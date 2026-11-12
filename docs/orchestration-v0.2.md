@@ -67,7 +67,7 @@ These let the three lanes work in parallel. Names are fixed; a worker implements
 | Preferences keys | `alert_snooze_seconds` (5–120, default 15), `alert_stale_seconds` (30–300, default 60), `awake_chime` (bool, default false) |
 | `GET /api/alert-state` | Adds `acknowledged` (bool), `acknowledged_until` (ISO or null), `ack_seconds_left` (int), `awake_event_id` (int or null; changes each time a chime should play). Existing fields keep their meaning; `snooze_seconds` now carries the configured value. |
 | `POST /api/alert/acknowledge` | No body. Returns `{"acknowledged_until": "<iso>"}`, or null when nothing is alerting. |
-| `GET /api/widget-series?minutes=10` | `{"device_serial", "warn_threshold", "critical_threshold", "points": [{"t": "<iso>", "spo2": 97}]}` for the alerting device, else the first. `minutes` is clamped to 1–60. |
+| `GET /api/widget-series?minutes=10` | `{"device_serial", "warn_threshold", "critical_threshold", "points": [{"t": "<iso>", "spo2": 97}]}` for the alerting device, else the first. `minutes` is clamped to 1–60. Part 3 (V8b) adds `"sleep": {"state": "asleep" \| "awake", "since": "<iso UTC>"}` or null, for the same device: null when stale, sock off, charging or unknown; a run ends at a state change, a sock-off/charging row or a gap over 10 minutes, and looks back at most 16 h. |
 
 ### Tauri commands (shell)
 
@@ -83,6 +83,14 @@ These let the three lanes work in parallel. Names are fixed; a worker implements
 | `set_widget_mode({size, opacity, click_through})` | applied mode | `size`: `micro` 110×32, `compact` 300×120, `expanded` 300×200 |
 
 Existing commands (`snooze_alert`, `show_main`, `hide_widget`, `overlay_state`) are unchanged.
+
+**Added in part 3:**
+- `show_widget_menu` (no args, returns nothing): pops the widget's native right-click menu (R9).
+- `acknowledge_alert`: if the POST fails (server unreachable), it acts exactly like snooze for the configured length (your decision, R8).
+- The shell's local snooze length is the last `snooze_seconds` from `/api/alert-state` (15 until first heard).
+- Overlay: one window per flash target, labelled `overlay`, `overlay-1`, … (capability window glob `overlay-*`). `overlay_state` returns the calling window's payload. The payload adds `snooze_seconds` and `can_acknowledge`.
+- `flash_target` "all": click-through border frame on the primary, full flash on every other monitor (your decision). A missing chosen monitor falls back to "secondary". Game mode (R11) uses "all" while active.
+- `set_widget_mode`: `click_through` is runtime only (off at launch). An amber/red alert forces click-through off (it stays off) and opacity to 100% (restored after).
 
 **`armed_state` problems (fixed in R4).**
 - **Order:** faults come first, in the order `server`, `watchdog`, `no_audio`, `muted`, `sleep`, `stale`. `not_collecting` (informational) is always last.
