@@ -1,10 +1,76 @@
-# v0.2 handoff (parts 1 and 2)
+# v0.2 handoff (parts 1, 2 and 3)
 
-Written by the part 1 orchestrator on 2026-11-11, when part 1 closed, and extended by the part 2 orchestrator on 2026-11-11, when part 2 closed. Part 3 knows only what is in the repository; this file is the record of what parts 1 and 2 did, changed and left open. Where it disagrees with [plan-v0.2.md](plan-v0.2.md) or [orchestration-v0.2.md](orchestration-v0.2.md), this file is newer.
+Written by the part 1 orchestrator on 2026-11-11, when part 1 closed, extended by the part 2 orchestrator on 2026-11-11, when part 2 closed, and by the part 3 orchestrator on 2026-11-12, after integration and the acceptance walk-through. This file is the record of what each part did, changed and left open. Where it disagrees with [plan-v0.2.md](plan-v0.2.md) or [orchestration-v0.2.md](orchestration-v0.2.md), this file is newer.
 
-- The **"Part 2"** section below is part 2's record.
-- The **package status table** is current as of part 2's close.
-- Every other section is part 1's record and still applies unless the Part 2 section says otherwise.
+- The **"Part 3"** section below is part 3's record and the current state.
+- The **"Part 2"** section is part 2's record.
+- The **package status table** further down is as of part 2's close; part 3 finished every remaining package (see Part 3).
+- Every other section is part 1's record and still applies unless a later section says otherwise.
+
+## Part 3 (waves 8–10, integration, acceptance)
+
+### State
+
+- **All 28 packages are done**, plus two extras: R6b (part 2) and V8b (part 3). The branch is `v0.2`, never pushed.
+- **0.2.0 is built and installed** over the previous version at `%LOCALAPPDATA%\Owlet Dashboard`, from the commit before the screenshots. The installer is `desktop/src-tauri/target/release/bundle/nsis/Owlet Dashboard_0.2.0_x64-setup.exe` (unsigned for the updater). The sidecar was last rebuilt during integration; no Python changed after that.
+- **Section 7 checks at close:** pytest 257 passed, node 71 passed, cargo test 171 passed (1 ignored), clippy clean.
+
+### Part 3 commits, in order
+
+| Commit | What |
+|---|---|
+| `791cbf8` | V8b (V, extra): sleep timer in the expanded widget (`sleep` field on `/api/widget-series`) |
+| `cf233ce` | R8 (O): acknowledge ("I'm checking") and flash targets |
+| `aec813a` | V9 (V): overlay restyle |
+| `47d243a` | R9 (O): widget window modes (sizes, opacity, click-through, snapping, right-click menu) |
+| `de7e1ca` | V9 fix: overlay tests and button guards (first failure, same worker) |
+| `21e350c` | R10 (S): live SpO₂ tray icon |
+| `19b92ca` | R11 (S): game mode, capture exclusion, awake chime |
+| `4a3a3eb` | P5 (H): version 0.2.0 |
+| `0f0d0a5` | S1 (S): READMEs |
+| `30f218e` | Integration: `build-sidecar.ps1` works under Windows PowerShell 5.1 |
+| `c4b4b45` | Guide §4 records the part 3 contract additions |
+| `dde6b74` | Walk-through fix: game mode ignores our own foreground window; "all" falls back to the (0,0) monitor as primary |
+| `09aef50` | Walk-through fix: each overlay applies only its own payload (the real "all monitors" bug); no game mode while our overlay shows |
+| `0b64745` | Walk-through fix: widget snaps its visible edges, not Windows' invisible 8 px border |
+| `449af4a` | Walk-through tweak: snap distance 32 px (was 12), the user's request |
+| `b1cfae8` | Section 9 step 5: screenshots regenerated |
+
+### User decisions
+
+- **"All monitors"** puts a click-through border frame on the primary and a full flash on every other monitor.
+- **"I'm checking" while the server is unreachable** acts like a snooze (snooze length), so the press is never lost.
+- **V8b sleep timer** was added as an extra package.
+- **Snap distance** is 32 px.
+- **Start at login** was left unchecked because a restart wasn't possible that day.
+
+### Orchestrator decisions written into briefs
+
+- An amber or red alert turns widget click-through off (it stays off) and makes the widget fully opaque; the saved opacity returns after.
+- The awake chime never plays during an alarm or an amber/red alert. R11's worker allowed it during a snooze; left as built.
+- While any overlay is showing, the fullscreen reading is frozen at its previous value: a game detected before the alert keeps every monitor flashing; a game started mid-alert is picked up after it ends.
+
+### Acceptance walk-through (2026-11-12, user's PC, two 2560×1440 monitors)
+
+| Group | Result |
+|---|---|
+| 1. Install, first run, widget basics | Pass |
+| 2. Armed state, keep-awake, watchdog | Pass (watchdog restart about 10–11 s, toast seen; muted warning; `powercfg /requests`). Audio device removed: **skipped** (no spare device) |
+| 3. I'm checking, flash targets, overlay | Pass after `dde6b74` and `09aef50`. Before them, primary border and "all" both showed a full flash on the primary |
+| 4. Widget modes, tray icon | Pass after `0b64745` and `449af4a` (snapping missed every edge but the top) |
+| 5. Hotkeys, controller, game mode, capture exclusion, chime | Pass |
+| 6. Start at login; v0.1 leftovers | Overlay keeps focus: pass. Monitor placement, alarm audio: pass (groups 2–3 and the R3 checkpoint). **Start at login after a restart: not checked.** **Quitting when the tray fails: not checked by hand** (needs a forced tray failure) |
+
+The v0.1 hands-on checkpoint from before wave 1 is now closed, except for the tray-failure quit.
+
+### Known issues and follow-ups
+
+- **Unexplained stop.** On 2026-11-12 the installed app was found not running about 3 h after a normal start. The log has no "app exit" line, Windows recorded no crash, and there was no restart, sign-out or sleep. The user didn't say whether they quit it. Worth a look: a silent exit would stop alerts.
+- **R8's unit tests write to the real `desktop.log`** ("acknowledge failed, snoozing …", interleaved when tests run in parallel). They should use a temporary log.
+- **Today page, sock charging:** the two chart placeholders overlap ("COLLECTOR OFF" over "CHARGING"), seen in the live app.
+- **`build-sidecar.ps1` under PowerShell 7** is claimed in the README but untested (pwsh isn't installed).
+- **"Game mode: on" at login start** was logged once right after launch; expected if a fullscreen app was open, not investigated.
+- **Screenshots** come from an anonymised, time-shifted copy of the review database (account "Demo", no email or baby name), served by the installed 0.2.0 server on a separate port. Never commit screenshots of the live app: it shows the Owlet email and the baby's name.
 
 ## Part 2 (waves 5–7)
 
