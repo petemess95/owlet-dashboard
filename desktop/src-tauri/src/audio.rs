@@ -24,6 +24,7 @@ use crate::settings::Settings;
 static SOUND_BEEP: &[u8] = include_bytes!("../assets/alarm.wav");
 static SOUND_TWO_TONE: &[u8] = include_bytes!("../assets/alarm_two_tone.wav");
 static SOUND_PULSE: &[u8] = include_bytes!("../assets/alarm_pulse.wav");
+static SOUND_CHIME: &[u8] = include_bytes!("../assets/awake_chime.wav");
 
 const STOP_WAIT: Duration = Duration::from_secs(2);
 const RESTORE_WAIT: Duration = Duration::from_secs(2);
@@ -304,6 +305,37 @@ pub(crate) fn start_alarm(settings: impl FnOnce() -> Settings) {
         }
     };
     *guard = Some(Active { shared, handle });
+}
+
+/// True while an alarm is running (brief ALARM lock).
+pub(crate) fn alarm_active() -> bool {
+    lock(&ALARM).is_some()
+}
+
+/// The soft awake chime: once, async, default device, current volume (never
+/// unmutes or changes volume). PlaySoundW is process-wide and the alarm's
+/// fallback loops through it, so the chime plays only while no alarm exists:
+/// ALARM is held across the check and the call (lock order ALARM, FALLBACK,
+/// as in stop_alarm), so an alarm cannot start between them. Returns false
+/// when skipped for an alarm. An alarm that starts afterwards simply replaces
+/// the chime. stop_alarm only calls PlaySoundW(null) for an active alarm, so
+/// it never cuts a chime in normal use.
+pub(crate) fn play_chime() -> bool {
+    let guard = lock(&ALARM);
+    if guard.is_some() {
+        return false;
+    }
+    let _g = lock(&FALLBACK);
+    #[cfg(windows)]
+    unsafe {
+        use windows::core::PCWSTR;
+        use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
+        if !PlaySoundW(PCWSTR(SOUND_CHIME.as_ptr().cast()), None, SND_MEMORY | SND_ASYNC | SND_NODEFAULT).as_bool() {
+            log_line("awake chime: PlaySoundW failed");
+        }
+    }
+    drop(guard);
+    true
 }
 
 /// Idempotent. Stops playback first, then restores what we changed.

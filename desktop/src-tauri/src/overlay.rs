@@ -116,7 +116,11 @@ pub(crate) fn ensure_overlay(app: &AppHandle, label: &str) -> Option<WebviewWind
         .visible(false)
         .build()
     {
-        Ok(win) => Some(win),
+        Ok(win) => {
+            // Queued; a failure is logged and never stops the window showing.
+            crate::gamemode::apply_to_new_window(app, label);
+            Some(win)
+        }
         Err(err) => {
             log_line(&format!("overlay creation failed ({label}): {err}"));
             None

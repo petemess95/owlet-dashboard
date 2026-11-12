@@ -11,6 +11,7 @@ mod autostart;
 mod commands;
 mod controller;
 mod controller_hid;
+mod gamemode;
 mod hotkeys;
 mod http;
 mod overlay;
@@ -70,6 +71,11 @@ pub(crate) struct Shell {
     pub(crate) snooze_generation: AtomicU64,
     /// Latest armed verdict, `{armed, problems}`; see armed.rs.
     pub(crate) armed: Mutex<Value>,
+    /// Last fullscreen-app detection, written by the alert thread after each
+    /// poll's alert work and read by the next poll's apply_ui.
+    pub(crate) game_detected: AtomicBool,
+    /// Whether game behaviour was in force at the last apply_ui (transitions).
+    pub(crate) game_behaviour: AtomicBool,
 }
 
 impl Default for Shell {
@@ -88,6 +94,8 @@ impl Default for Shell {
             }),
             snooze_generation: AtomicU64::new(0),
             armed: Mutex::new(armed::pending_verdict()),
+            game_detected: AtomicBool::new(false),
+            game_behaviour: AtomicBool::new(false),
         }
     }
 }
@@ -415,7 +423,12 @@ fn main() {
             }
             match build_widget(app) {
                 // Saved size and opacity, now the position is restored.
-                Ok(_) => widget::apply_startup(app.handle()),
+                Ok(_) => {
+                    widget::apply_startup(app.handle());
+                    if app.state::<settings::DesktopSettings>().get().capture_exclusion {
+                        gamemode::apply_capture_exclusion(app.handle(), true);
+                    }
+                }
                 Err(err) => log_line(&format!("widget creation failed: {err}")),
             }
             widget::spawn_snapper(app.handle().clone());

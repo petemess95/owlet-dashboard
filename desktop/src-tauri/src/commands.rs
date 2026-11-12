@@ -192,6 +192,9 @@ pub(crate) fn set_desktop_settings(
     match result {
         Ok(new) => {
             crate::widget::apply_saved_changes(&app, &before, &new, false);
+            if before.capture_exclusion != new.capture_exclusion {
+                crate::gamemode::apply_capture_exclusion(&app, new.capture_exclusion);
+            }
             new.to_json()
         }
         Err(err) => {

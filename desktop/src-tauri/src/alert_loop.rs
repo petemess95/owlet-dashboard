@@ -10,6 +10,7 @@ use crate::armed::{
     KeepAwake, VerdictInputs, Watch,
 };
 use crate::audio::{audio_status, endpoint_facts, start_alarm, stop_alarm};
+use crate::gamemode::Chime;
 use crate::http::http_json;
 use crate::overlay::{
     hide_overlay, overlay_payload, pick_targets, show_overlays, snooze_seconds_of, update_overlay_text,
@@ -47,7 +48,10 @@ struct ArmedTracker {
 pub(crate) fn alert_loop(app: AppHandle) {
     let mut failures: u32 = 0;
     let mut tracker = ArmedTracker::default();
+    let mut chime = crate::gamemode::ChimeMemory::default();
     loop {
+        // (awake_event_id, active_level) of this poll, only when it succeeded.
+        let mut chime_poll: Option<(Option<i64>, String)> = None;
         let generation = app.state::<Shell>().snooze_generation.load(Ordering::SeqCst);
         match http_json("GET", "/api/alert-state", None) {
             Ok(state) => {
@@ -66,6 +70,10 @@ pub(crate) fn alert_loop(app: AppHandle) {
                     }
                 }
                 apply_state(&app, &state, generation);
+                chime_poll = Some((
+                    state["awake_event_id"].as_i64(),
+                    state["active_level"].as_str().unwrap_or("none").to_string(),
+                ));
                 tracker.last_state = Some(state);
             }
             Err(err) => {
@@ -92,6 +100,24 @@ pub(crate) fn alert_loop(app: AppHandle) {
                 "armed": false,
                 "problems": [{ "code": "server", "text": "Checking alert status" }],
             }));
+        }
+        // Also after the alert: fullscreen detection (read by the next poll)
+        // and the awake chime, which never plays during an alarm.
+        let after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            app.state::<Shell>().game_detected.store(crate::gamemode::detect_fullscreen(), Ordering::SeqCst);
+            if let Some((id, level)) = &chime_poll {
+                let quiet = level == "none" && !crate::audio::alarm_active();
+                match chime.on_poll(*id, quiet) {
+                    Chime::Play if crate::audio::play_chime() => {
+                        log_line(&format!("awake chime played (event {})", id.unwrap_or_default()))
+                    }
+                    Chime::Play | Chime::SkipBusy => log_line("awake chime skipped: alert or alarm active"),
+                    Chime::No => {}
+                }
+            }
+        }));
+        if after.is_err() {
+            log_line("game detection or chime panicked");
         }
         std::thread::sleep(ALERT_POLL);
     }
@@ -199,6 +225,11 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
     set_tooltip(app, &armed_tooltip(state, dev, fault.as_deref()));
     // Tell the controller poller (short lock, never blocks on XInput).
     crate::controller::publish(&active);
+    // Game behaviour from the previous poll's detection; only ever widens
+    // the flash target.
+    let settings = app.state::<crate::settings::DesktopSettings>().get();
+    let detected = app.state::<Shell>().game_detected.load(Ordering::SeqCst);
+    let game = crate::gamemode::game_behaviour(&settings.game_mode, detected);
 
     if active == "amber" || active == "red" {
         if active == "red" {
@@ -206,8 +237,7 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
         } else {
             stop_alarm();
         }
-        let flash_target = app.state::<crate::settings::DesktopSettings>().get().flash_target;
-        let targets = pick_targets(app, &flash_target);
+        let targets = pick_targets(app, crate::gamemode::flash_target_for(game, &settings.flash_target));
         if !targets.is_empty() {
             let mut key = active.clone();
             for t in &targets {
@@ -245,6 +275,14 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
     }));
     if icon.is_err() {
         log_line("tray icon update panicked");
+    }
+    // Only queues a main-thread call, and only on a change of game behaviour.
+    let was = app.state::<Shell>().game_behaviour.swap(game, Ordering::SeqCst);
+    let sized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::gamemode::sync_widget(app, was, game, &settings.widget_size);
+    }));
+    if sized.is_err() {
+        log_line("game mode widget resize panicked");
     }
 }
 
