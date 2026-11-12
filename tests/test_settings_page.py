@@ -22,6 +22,10 @@ from app.store import ReadingStore
 from tests.conftest import client_for, make_user
 
 NODE = shutil.which("node")
+# The shell's scripts are served from app/static/pages/; test the files themselves.
+PAGES = Path(__file__).resolve().parent.parent / "app" / "static" / "pages"
+SHELL_JS = (PAGES / "shell.js").read_text(encoding="utf-8")
+DESKTOP_SETTINGS_JS = (PAGES / "shell-desktop-settings.js").read_text(encoding="utf-8")
 
 
 def _page() -> str:
@@ -34,6 +38,18 @@ def _outside_template(page: str) -> str:
     end = page.index("</template>", start) + len("</template>")
     markup = re.sub(r"<script>[\s\S]*?</script>", "", page[:start] + page[end:])
     return re.sub(r"\s+", " ", markup)
+
+
+def test_shell_links_its_assets_in_load_order():
+    page = shell.render_shell(view="now", title="Today", body="<p>body</p>",
+                              scripts='<script src="/static/pages/now.js"></script>')
+    css = '<link rel="stylesheet" href="/static/pages/shell-settings.css" />'
+    assert page.index('<link rel="stylesheet" href="/theme.css" />') < page.index(css) < page.index("</head>")
+    # The desktop helpers, then the shell (window.owletO2 etc.), then the page's own script.
+    order = [page.index(f'<script src="/static/pages/{name}"></script>')
+             for name in ("shell-desktop-settings.js", "shell.js", "now.js")]
+    assert order == sorted(order)
+    assert page.index("</main>") < order[0] and order[-1] < page.index("</body>")
 
 
 def test_desktop_pane_lives_only_in_an_inert_template():
@@ -53,7 +69,7 @@ def test_desktop_pane_lives_only_in_an_inert_template():
 
 
 def test_desktop_pane_is_mounted_only_by_the_desktop_code_path():
-    js = shell.SHELL_JS
+    js = SHELL_JS
     # mount() only runs from mountDesktopSettings, which needs desktop mode AND the bridge.
     assert js.count(".mount(") == 1
     guard = re.search(r"function mountDesktopSettings\(\) \{(.*?)\n  \}", js, re.S)
@@ -69,13 +85,13 @@ def test_desktop_pane_is_mounted_only_by_the_desktop_code_path():
     early_return = js.index("if (!desktopMode) return;", health)
     assert health < early_return < calls[0]
     # The helper script itself never invokes anything at load.
-    loader = shell.DESKTOP_SETTINGS_JS
+    loader = DESKTOP_SETTINGS_JS
     assert "__TAURI__" not in loader
     assert loader.index("function mount(") < loader.index("invoke(")
 
 
 def test_shell_can_open_settings_on_the_this_pc_pane_once():
-    js = shell.SHELL_JS
+    js = SHELL_JS
     # The hook the desktop shell relies on (first-run walk-through).
     assert "window.owletOpenSettings = function (name)" in js
     hook = js[js.index("window.owletOpenSettings = function (name)"):]
@@ -102,14 +118,14 @@ def test_alerts_pane_rows_for_every_mode():
     assert re.search(r'id="alertStaleSetting" type="number" min="30" max="300"', visible)
     assert 'id="awakeChimeSetting" type="checkbox" role="switch"' in visible
     assert "shortest snooze applies" in visible
-    js = shell.SHELL_JS
+    js = SHELL_JS
     assert "key: 'alert_snooze_seconds', min: 5, max: 120, def: 15" in js
     assert "key: 'alert_stale_seconds', min: 30, max: 300, def: 60" in js
     assert "patchSelectedAccount({ dashboard_preferences: { awake_chime: wanted } })" in js
 
 
 def test_ui_defaults_and_volume_bounds_match_the_contract():
-    js = shell.DESKTOP_SETTINGS_JS
+    js = DESKTOP_SETTINGS_JS
     assert "unmute_on_red: true, alarm_volume: 60," in js
     assert "controller_mode: 'off', controller_buttons: null," in js
     assert "keep_awake: true, game_mode: 'auto', capture_exclusion: false," in js
@@ -145,7 +161,7 @@ async def test_served_page_hides_desktop_settings_in_hosted_mode(tmp_path):
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_desktop_helpers_in_node():
-    source = re.search(r"<script>([\s\S]*?)</script>", shell.DESKTOP_SETTINGS_JS).group(1)
+    source = DESKTOP_SETTINGS_JS
     harness = """
 const vm = require('node:vm');
 const assert = require('node:assert/strict');

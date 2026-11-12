@@ -1,13 +1,14 @@
 # Owlet Dashboard: repo map
 
 FastAPI + SQLite app (`app/`) with a Tauri Windows shell (`desktop/`). Pages are server-rendered
-Python strings of HTML/CSS/JS. Branch `v0.2`. Safety-critical: the low-oxygen alert path (see the
+Python strings of HTML; each page's CSS/JS lives in `app/static/pages/`. Branch `v0.2`. Safety-critical: the low-oxygen alert path (see the
 "Not a medical alarm" notes in README) must never be weakened silently.
 
 ## Token rules (read first)
 
-- **Never read whole** `app/dashboard.py`, `now_page.py`, `shell.py` (each 140-180 KB). Grep for the
-  anchor in the table below, then `Read` with `offset`/`limit`.
+- **Never read whole** `app/static/pages/data.js` (137 KB), `now.js` (107 KB), `shell.js` (72 KB).
+  Grep for the function/anchor, then `Read` with `offset`/`limit`. `shell.py` (40 KB, mostly HTML)
+  likewise; the other page modules are now small.
 - **Skip** `docs/` unless the task names it. `docs/*v0.2*` is the v0.2 build plan/handoff (~100 KB;
   current state: `docs/orchestration-v0.2-handoff.md`). `docs/archive/` is finished v0.1 history; never read. `docs/prompts/` holds ready-made task briefs; read only if told.
 - **Skip** `*.png`/`*.wav`. `Cargo.lock`, `desktop/{build,dist}`, `.venv`, `data/` and caches are
@@ -26,7 +27,7 @@ Python strings of HTML/CSS/JS. Branch `v0.2`. Safety-critical: the low-oxygen al
 | Users/sessions/login | `app/auth_store.py`, `auth_routes.py`, `auth_pages.py`, `security.py`, `ratelimit.py` |
 | Data models | `app/models.py`, `notifications.py`, `quality.py` (offline filter) |
 | Stats / trends / insights | `app/analytics.py`, `oxygen_challenges.py`; client side `app/static/insights.js` |
-| Nav bar, tabs, theme, **Settings UI** (incl. "This PC" settings) | `app/shell.py` (`TABS`, `SHELL_JS`, `SETTINGS_CSS`, `DESKTOP_SETTINGS_TEMPLATE`, `DESKTOP_SETTINGS_JS`, `render_shell`) |
+| Nav bar, tabs, theme, **Settings UI** (incl. "This PC" settings) | js `app/static/pages/shell.js`, "This PC" js `shell-desktop-settings.js`, css `shell-settings.css`; html in `app/shell.py` (`TABS`, `THEME_RESOLVER`, `DESKTOP_SETTINGS_TEMPLATE`, `render_shell`) |
 | Today page (`/`) | css `app/static/pages/now.css`, js `app/static/pages/now.js`; html in `app/now_page.py` (`NOW_BODY`) |
 | Tonight page (`/night`) | css `app/static/pages/night.css`, js `app/static/pages/night.js`; html in `app/night_page.py` (`NIGHT_BODY`) |
 | Page CSS/JS files (`app/static/pages/*.{css,js}`) | served by `page_asset` in `app/main.py` at `/static/pages/<name>` (public, `no-cache`) |
@@ -64,6 +65,10 @@ node --test tests/widget_alerts.test.cjs
 
 ## Conventions
 
-- Pages are plain Python strings: JS/CSS inside them is not linted; check by running the page tests.
+- Page HTML is plain Python strings; page CSS/JS is in `app/static/pages/` (served byte-for-byte,
+  no build step, not linted). Check by running the page tests. Tests that assert on page text use
+  `with_page_assets()` from `tests/conftest.py` (HTML + every linked page file).
+- Server values a page script needs go in a small inline config `<script>` in Python, never into
+  the static file (see `DATA_BODY`'s `API_BASE`/`SHARE_MODE`). The static files are public.
 - Everything is account-scoped (`account_id`/`user_id`); keep tenancy tests passing when touching `store.py`.
 - Keep the map current: if you add/move a module or page, update the table above.
