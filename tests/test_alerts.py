@@ -627,6 +627,65 @@ def test_collection_survives_alert_engine_failure(monkeypatch):
     assert len(stored) == 1
 
 
+def test_alerts_survive_a_failing_database_write():
+    """A store that can't write (disk full, locked file) must not keep low
+    readings from the alert engine."""
+    ALERTS.reset()
+
+    class Store(_FakeStore):
+        writes = 0
+
+        async def insert_reading(self, r, account_id=None):
+            Store.writes += 1
+            if Store.writes >= 2:
+                poller._stop.set()
+            raise OSError("disk full")
+
+    count = 0
+
+    async def read_once():
+        nonlocal count
+        count += 1
+        return reading(count, 80)
+
+    poller = Poller(Store({}), read_once=read_once, interval_seconds=0, account_id=1)
+    poller._maybe_send_readiness = lambda: asyncio.sleep(0)  # type: ignore[method-assign]
+    asyncio.run(poller._run())
+    assert Store.writes == 2
+    assert ALERTS.state(1, [1], True, time.time())["active_level"] == "red"
+    ALERTS.reset()
+
+
+def test_alerts_keep_the_last_settings_when_the_account_row_cannot_be_read():
+    ALERTS.reset()
+
+    class Store(_FakeStore):
+        broken = False
+
+        async def get_account(self, account_id, user_id=None):
+            if Store.broken:
+                raise OSError("database is locked")
+            return await super().get_account(account_id)
+
+    # Custom tiers: 93 is amber only under the account's own warn threshold.
+    poller = Poller(Store({"o2_warn_threshold": 95, "o2_critical_threshold": 88}),
+                    read_once=None, interval_seconds=10, account_id=7)  # type: ignore[arg-type]
+    asyncio.run(poller._feed_alerts(reading(0, 93)))
+    Store.broken = True
+    asyncio.run(poller._feed_alerts(reading(1, 93)))
+    state = ALERTS.state(1, [7], True, time.time())
+    assert state["active_level"] == "amber"
+    assert state["devices"][0]["warn_threshold"] == 95
+
+    # Never read at all: the shipped defaults still alert.
+    ALERTS.reset()
+    fresh = Poller(Store({}), read_once=None, interval_seconds=10, account_id=8)  # type: ignore[arg-type]
+    for i in range(2):
+        asyncio.run(fresh._feed_alerts(reading(i, 80)))
+    assert ALERTS.state(1, [8], True, time.time())["active_level"] == "red"
+    ALERTS.reset()
+
+
 # ---- API ---------------------------------------------------------------------
 
 DEVICE_KEYS = {

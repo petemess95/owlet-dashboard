@@ -89,6 +89,9 @@ class Poller:
         self._last_alert_at = float("-inf")   # monotonic clock starts near 0 on fresh boots
         self._last_readiness_key: str | None = None
         self._frozen = FrozenVitalsDetector()
+        # Last alert settings read from the account row (see _feed_alerts).
+        self._alert_prefs: dict[str, Any] = {}
+        self._alert_name = "Owlet account"
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -113,8 +116,10 @@ class Poller:
         while not self._stop.is_set():
             try:
                 reading = self._frozen.mark(await self.read_once())
-                await self.store.insert_reading(reading, account_id=self.account_id)
+                # Alerts first: a failing database write (disk full, locked
+                # file) must never keep a low reading from the alert engine.
                 await self._feed_alerts(reading)
+                await self.store.insert_reading(reading, account_id=self.account_id)
                 await self._check_custom_alert(reading)
                 await self._persist_tokens()
                 logger.info(
@@ -144,17 +149,29 @@ class Poller:
         if self.account_id is None or self._stop.is_set():
             return
         try:
-            account = await self.store.get_account(self.account_id)
-            prefs = account.get("dashboard_preferences") or {}
+            # The account row only supplies settings. If it can't be read, keep
+            # alerting on the last settings seen (the defaults before any).
+            try:
+                account = await self.store.get_account(self.account_id)
+                raw_prefs = account.get("dashboard_preferences")
+                self._alert_prefs = raw_prefs if isinstance(raw_prefs, dict) else {}
+                self._alert_name = str(
+                    account.get("display_name") or account.get("email") or "Owlet account"
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Could not read alert settings; using the last known ones")
+            prefs = self._alert_prefs
+            name = self._alert_name
             warn, critical = resolve_o2_thresholds(prefs)
             _, stale_seconds = resolve_alert_timing(prefs)
-            name = str(account.get("display_name") or account.get("email") or "Owlet account")
             # A slow poll interval mustn't make every device look stale.
             stale_after = max(stale_seconds, 2 * self.interval_seconds + 15)
             ALERTS.observe(
                 self.account_id, name, reading, warn, critical, time.time(),
                 stale_after=stale_after,
-                awake_chime=isinstance(prefs, dict) and prefs.get("awake_chime") is True,
+                awake_chime=prefs.get("awake_chime") is True,
             )
         except asyncio.CancelledError:
             raise
