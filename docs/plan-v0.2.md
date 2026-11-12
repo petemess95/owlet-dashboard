@@ -1,7 +1,7 @@
 # Owlet Dashboard v0.2 plan
 
 Status: **draft for review**. Nothing in this document is implemented yet.
-Builds on: [fork-plan-widget-alerts.md](fork-plan-widget-alerts.md) (v0.1 widget and alerts) and [review-widget-alerts-findings.md](review-widget-alerts-findings.md) (its remediation).
+Builds on: [fork-plan-widget-alerts.md](archive/fork-plan-widget-alerts.md) (v0.1 widget and alerts) and [review-widget-alerts-findings.md](archive/review-widget-alerts-findings.md) (its remediation).
 Visual reference: [mockups/today-night-sky.html](mockups/today-night-sky.html).
 How the work is delegated: [orchestration-v0.2.md](orchestration-v0.2.md).
 

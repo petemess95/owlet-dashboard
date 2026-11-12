@@ -2,7 +2,7 @@
 
 **For:** code reviewer (Codex)
 **Branch:** `fork/widget-alerts` (based on `main` at `81cc4b8`)
-**Spec:** [`docs/fork-plan-widget-alerts.md`](fork-plan-widget-alerts.md). Read sections 2, 4 and 5 first: they hold the decisions and the API contract.
+**Spec:** [`docs/archive/fork-plan-widget-alerts.md`](fork-plan-widget-alerts.md). Read sections 2, 4 and 5 first: they hold the decisions and the API contract.
 
 **Commits**
 

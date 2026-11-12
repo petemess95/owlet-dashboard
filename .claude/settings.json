@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./desktop/src-tauri/Cargo.lock)",
+      "Read(./desktop/build/**)",
+      "Read(./desktop/dist/**)",
+      "Read(./desktop/src-tauri/target/**)",
+      "Read(./desktop/src-tauri/binaries/**)",
+      "Read(./desktop/src-tauri/assets/*.wav)",
+      "Read(./.venv/**)",
+      "Read(./.pytest-tmp/**)",
+      "Read(./.pytest_cache/**)",
+      "Read(./.ruff_cache/**)",
+      "Read(./data/**)"
+    ]
+  }
+}
