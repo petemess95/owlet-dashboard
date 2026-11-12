@@ -111,6 +111,40 @@ pub(crate) fn place_resized(old: Rect, w: i32, h: i32, work: Rect) -> (i32, i32)
     (x.min(work.right() - w).max(work.x), y.min(work.bottom() - h).max(work.y))
 }
 
+/// The invisible frame around the visible widget: outer minus visible, per
+/// side. Windows keeps an invisible resize border (about 8 px left, right and
+/// bottom, 0 top) outside what the widget draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Insets {
+    pub(crate) left: i32,
+    pub(crate) top: i32,
+    pub(crate) right: i32,
+    pub(crate) bottom: i32,
+}
+
+pub(crate) fn insets(outer: Rect, visible: Rect) -> Insets {
+    Insets {
+        left: visible.x - outer.x,
+        top: visible.y - outer.y,
+        right: outer.right() - visible.right(),
+        bottom: outer.bottom() - visible.bottom(),
+    }
+}
+
+/// The outer (window) position that puts the visible rect at `(x, y)`.
+pub(crate) fn visible_to_outer(x: i32, y: i32, ins: Insets) -> (i32, i32) {
+    (x - ins.left, y - ins.top)
+}
+
+/// Snap the visible rect to the work area of the monitor it is on; returns the
+/// outer position to set, or None when nothing moves.
+pub(crate) fn snap_outer(outer: Rect, visible: Rect, monitors: &[(Rect, Rect)]) -> Option<(i32, i32)> {
+    let work = pick_work_area(visible, monitors)?;
+    let (x, y) = snap_position(visible, work, SNAP_PX);
+    let pos = visible_to_outer(x, y, insets(outer, visible));
+    (pos != (outer.x, outer.y)).then_some(pos)
+}
+
 // ---------------------------------------------------------------------------
 // Mode decisions (pure)
 // ---------------------------------------------------------------------------
@@ -286,10 +320,18 @@ fn monitor_rects(app: &AppHandle) -> Vec<(Rect, Rect)> {
         .collect()
 }
 
-fn window_rect(win: &WebviewWindow) -> Option<Rect> {
+/// `(outer window rect, visible rect)` in physical pixels. The visible rect is
+/// the client area, which the webview fills; the outer rect also holds the
+/// invisible resize border.
+fn window_rects(win: &WebviewWindow) -> Option<(Rect, Rect)> {
     let p = win.outer_position().ok()?;
     let s = win.outer_size().ok()?;
-    Some(Rect::new(p.x, p.y, s.width as i32, s.height as i32))
+    let ip = win.inner_position().ok()?;
+    let is = win.inner_size().ok()?;
+    Some((
+        Rect::new(p.x, p.y, s.width as i32, s.height as i32),
+        Rect::new(ip.x, ip.y, is.width as i32, is.height as i32),
+    ))
 }
 
 /// Queue window calls on the main thread; never blocks the caller.
@@ -436,18 +478,21 @@ pub(crate) fn set_size_runtime(app: &AppHandle, size: &str) {
 
 fn apply_size_now(app: &AppHandle, size: &str) {
     let (Some(win), Some((lw, lh))) = (widget(app), size_dims(size)) else { return };
-    let old = window_rect(&win);
+    let old = window_rects(&win);
+    // `set_size` sets the client (visible) size, so work in visible rects
+    // and convert back to the outer position, keeping the same insets.
     if let Err(err) = win.set_size(LogicalSize::new(lw, lh)) {
         log_line(&format!("widget: resize to {size} failed: {err}"));
         return;
     }
-    let Some(old) = old else { return };
+    let Some((old_outer, old_visible)) = old else { return };
     let scale = win.scale_factor().unwrap_or(1.0);
     let (w, h) = ((lw * scale).round() as i32, (lh * scale).round() as i32);
-    if let Some(work) = pick_work_area(old, &monitor_rects(app)) {
-        let (x, y) = place_resized(old, w, h, work);
-        if (x, y) != (old.x, old.y) {
-            let _ = win.set_position(PhysicalPosition::new(x, y));
+    if let Some(work) = pick_work_area(old_visible, &monitor_rects(app)) {
+        let (x, y) = place_resized(old_visible, w, h, work);
+        let pos = visible_to_outer(x, y, insets(old_outer, old_visible));
+        if pos != (old_outer.x, old_outer.y) {
+            let _ = win.set_position(PhysicalPosition::new(pos.0, pos.1));
         }
     }
 }
@@ -638,10 +683,8 @@ fn mouse_held() -> bool {
 
 fn snap_now(app: &AppHandle) {
     let Some(win) = widget(app) else { return };
-    let Some(rect) = window_rect(&win) else { return };
-    let Some(work) = pick_work_area(rect, &monitor_rects(app)) else { return };
-    let (x, y) = snap_position(rect, work, SNAP_PX);
-    if (x, y) != (rect.x, rect.y) {
+    let Some((outer, visible)) = window_rects(&win) else { return };
+    if let Some((x, y)) = snap_outer(outer, visible, &monitor_rects(app)) {
         let _ = win.set_position(PhysicalPosition::new(x, y));
     }
 }
@@ -765,6 +808,81 @@ mod tests {
         assert!(x >= -1920 && x + 300 <= 0 && y >= 0 && y + 200 <= 1040);
         // Bigger than the work area: top-left of it.
         assert_eq!(place_resized(old, 4000, 4000, work), (-1920, 0));
+    }
+
+    /// Outer rect around a 300x120 visible rect with 8/0/8/8 insets.
+    fn framed(x: i32, y: i32) -> (Rect, Rect) {
+        (Rect::new(x - 8, y, 316, 128), Rect::new(x, y, 300, 120))
+    }
+
+    /// Apply a snap and return the resulting visible rect.
+    fn snapped_visible(x: i32, y: i32, mons: &[(Rect, Rect)]) -> Rect {
+        let (outer, visible) = framed(x, y);
+        assert_eq!(insets(outer, visible), Insets { left: 8, top: 0, right: 8, bottom: 8 });
+        match snap_outer(outer, visible, mons) {
+            Some((ox, oy)) => Rect::new(ox + 8, oy, 300, 120),
+            None => visible,
+        }
+    }
+
+    #[test]
+    fn snaps_the_visible_edge_flush_despite_the_invisible_border() {
+        let mons = [(Rect::new(0, 0, 1920, 1080), WORK)];
+        assert_eq!(snapped_visible(7, 500, &mons).x, 0);
+        assert_eq!(snapped_visible(1920 - 300 - 9, 500, &mons).right(), 1920);
+        assert_eq!(snapped_visible(800, 10, &mons).y, 0);
+        assert_eq!(snapped_visible(800, 1040 - 120 - 11, &mons).bottom(), 1040);
+        // The outer position sent for the right edge: border hangs past it.
+        let (outer, visible) = framed(1610, 500);
+        assert_eq!(snap_outer(outer, visible, &mons), Some((1612, 500)));
+        // Nothing within 12 px: no move.
+        let (outer, visible) = framed(13, 13);
+        assert_eq!(snap_outer(outer, visible, &mons), None);
+        let (outer, visible) = framed(1920 - 300 - 13, 1040 - 120 - 13);
+        assert_eq!(snap_outer(outer, visible, &mons), None);
+    }
+
+    #[test]
+    fn snap_settles_after_one_move() {
+        let mons = [(Rect::new(0, 0, 1920, 1080), WORK)];
+        for (x, y) in [(5, 5), (1615, 925), (3, 920)] {
+            let v = snapped_visible(x, y, &mons);
+            let (outer, visible) = framed(v.x, v.y);
+            assert_eq!(snap_outer(outer, visible, &mons), None);
+        }
+    }
+
+    #[test]
+    fn snaps_the_visible_edge_to_the_monitor_to_monitor_edge() {
+        let primary = (Rect::new(0, 0, 2560, 1440), Rect::new(0, 0, 2560, 1400));
+        let second = (Rect::new(2560, 0, 2560, 1440), Rect::new(2560, 0, 2560, 1400));
+        let mons = [primary, second];
+        // Visible left edge 6 px right of 2560: on the second monitor.
+        assert_eq!(snapped_visible(2566, 600, &mons).x, 2560);
+        // Visible right edge 6 px short of 2560: on the primary.
+        assert_eq!(snapped_visible(2560 - 300 - 6, 600, &mons).right(), 2560);
+        // The measured case: outer right flush at 5120, visible 8 px short.
+        assert_eq!(snapped_visible(5120 - 300 - 8, 998, &mons).right(), 5120);
+    }
+
+    #[test]
+    fn zero_insets_snap_like_before() {
+        let mons = [(Rect::new(0, 0, 1920, 1080), WORK)];
+        for (x, y) in [(12, 500), (-7, 500), (1608, 500), (800, 908), (13, 13), (1615, 925)] {
+            let r = Rect::new(x, y, 300, 120);
+            let got = snap_outer(r, r, &mons).unwrap_or((x, y));
+            assert_eq!(got, snap_position(r, WORK, SNAP_PX));
+        }
+    }
+
+    #[test]
+    fn resize_keeps_the_visible_widget_flush_right_and_bottom() {
+        let (outer, visible) = framed(1620, 920);
+        let (x, y) = place_resized(visible, 300, 200, WORK);
+        assert_eq!((x + 300, y + 200), (1920, 1040));
+        assert_eq!(visible_to_outer(x, y, insets(outer, visible)), (1612, 840));
+        let (x, y) = place_resized(visible, 110, 32, WORK);
+        assert_eq!((x + 110, y + 32), (1920, 1040));
     }
 
     #[test]
