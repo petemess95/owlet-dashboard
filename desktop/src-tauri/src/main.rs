@@ -16,6 +16,7 @@ mod http;
 mod overlay;
 mod settings;
 mod tray;
+mod tray_icon;
 mod widget;
 
 use alert_loop::AppliedState;

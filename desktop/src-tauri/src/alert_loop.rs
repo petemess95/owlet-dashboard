@@ -239,6 +239,13 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
     if widget.is_err() {
         log_line("widget alert override panicked");
     }
+    // Last of all: queues the tray icon change, never waits, never panics out.
+    let icon = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::tray_icon::update(app, state, dev);
+    }));
+    if icon.is_err() {
+        log_line("tray icon update panicked");
+    }
 }
 
 #[cfg(test)]
