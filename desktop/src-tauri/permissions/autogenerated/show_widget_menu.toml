@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-widget-menu"
+description = "Enables the show_widget_menu command without any pre-configured scope."
+commands.allow = ["show_widget_menu"]
+
+[[permission]]
+identifier = "deny-show-widget-menu"
+description = "Denies the show_widget_menu command without any pre-configured scope."
+commands.deny = ["show_widget_menu"]

@@ -33,6 +33,8 @@ pub(crate) fn do_toggle_widget(app: &AppHandle) {
             let _ = win.hide();
         } else {
             let _ = win.show();
+            // Showing rewrites the window style, which drops the opacity.
+            crate::widget::reassert_opacity(app);
         }
     }
     sync_widget_toggle(app);
@@ -89,9 +91,10 @@ pub(crate) fn acknowledge_on(
     });
 }
 
-/// Placeholder for the click-through hotkey (built in R9).
-pub(crate) fn do_toggle_click_through(_app: &AppHandle) {
-    log_line("click-through hotkey: not built yet");
+/// Click-through hotkey (and tray/menu): toggles the widget's ghost mode.
+/// Turning it on during an amber/red alert is refused (see widget.rs).
+pub(crate) fn do_toggle_click_through(app: &AppHandle) {
+    crate::widget::toggle_click_through(app);
 }
 
 pub(crate) fn do_test_alert(level: &str) {
@@ -145,6 +148,7 @@ pub(crate) fn set_desktop_settings(
     let hk = app.state::<Hotkeys>();
     let be = hotkeys::OsBackend(&app);
     let os = autostart::PluginBackend(&app);
+    let before = state.get();
     let result = state.apply_patch_with(
         &data_dir(),
         &patch,
@@ -186,7 +190,10 @@ pub(crate) fn set_desktop_settings(
         },
     );
     match result {
-        Ok(new) => new.to_json(),
+        Ok(new) => {
+            crate::widget::apply_saved_changes(&app, &before, &new, false);
+            new.to_json()
+        }
         Err(err) => {
             log_line(&format!("settings rejected ({}): {}", err.field, err.message));
             err.to_json()
@@ -277,6 +284,27 @@ pub(crate) async fn capture_controller_button() -> Value {
             log_line("controller capture panicked");
             Value::Null
         })
+}
+
+/// `set_widget_mode({size, opacity, click_through})`: every field optional;
+/// returns the applied `{size, opacity, click_through}` or
+/// `{error: {field, message}}` (nothing changes on error).
+#[tauri::command(rename_all = "snake_case")]
+pub(crate) fn set_widget_mode(
+    app: AppHandle,
+    size: Option<Value>,
+    opacity: Option<Value>,
+    click_through: Option<Value>,
+) -> Value {
+    crate::widget::set_mode(&app, size, opacity, click_through)
+}
+
+/// Pop up the widget's native menu at the cursor.
+#[tauri::command]
+pub(crate) fn show_widget_menu(app: AppHandle) {
+    if let Err(err) = crate::widget::show_menu(&app) {
+        log_line(&format!("widget menu failed: {err}"));
+    }
 }
 
 /// Whether this PC will sound an alert right now; see armed.rs.

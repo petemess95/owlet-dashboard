@@ -208,20 +208,19 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
         }
         let flash_target = app.state::<crate::settings::DesktopSettings>().get().flash_target;
         let targets = pick_targets(app, &flash_target);
-        if targets.is_empty() {
-            return;
-        }
-        let mut key = active.clone();
-        for t in &targets {
-            key += &format!("|{},{}|{}x{}|{}", t.pos.x, t.pos.y, t.size.width, t.size.height, t.border);
-        }
-        let shown: Vec<_> = targets.iter().map(|t| (*t, overlay_payload(state, dev, *t))).collect();
-        let changed = applied.key != key;
-        if changed {
-            show_overlays(app, &shown);
-            applied.key = key;
-        } else {
-            update_overlay_text(app, &shown);
+        if !targets.is_empty() {
+            let mut key = active.clone();
+            for t in &targets {
+                key += &format!("|{},{}|{}x{}|{}", t.pos.x, t.pos.y, t.size.width, t.size.height, t.border);
+            }
+            let shown: Vec<_> = targets.iter().map(|t| (*t, overlay_payload(state, dev, *t))).collect();
+            let changed = applied.key != key;
+            if changed {
+                show_overlays(app, &shown);
+                applied.key = key;
+            } else {
+                update_overlay_text(app, &shown);
+            }
         }
     } else {
         let changed = applied.key != "none";
@@ -230,6 +229,15 @@ pub(crate) fn apply_ui(app: &AppHandle, state: &Value, applied: &mut AppliedStat
             applied.key = "none".into();
         }
         stop_alarm();
+    }
+    // After the alarm and overlay: amber/red makes the widget clickable and
+    // opaque. Only queues window calls (never waits on the main thread), and
+    // a panic here can't stop the alert loop.
+    let widget = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::widget::alert_override(app, &active);
+    }));
+    if widget.is_err() {
+        log_line("widget alert override panicked");
     }
 }
 

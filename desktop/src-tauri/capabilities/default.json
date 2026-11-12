@@ -19,6 +19,8 @@
     "allow-list-monitors",
     "allow-list-audio-devices",
     "allow-armed-state",
-    "allow-capture-controller-button"
+    "allow-capture-controller-button",
+    "allow-set-widget-mode",
+    "allow-show-widget-menu"
   ]
 }

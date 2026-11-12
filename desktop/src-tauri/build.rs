@@ -16,6 +16,8 @@ fn main() {
                 "list_audio_devices",
                 "armed_state",
                 "capture_controller_button",
+                "set_widget_mode",
+                "show_widget_menu",
             ]),
         ),
     )

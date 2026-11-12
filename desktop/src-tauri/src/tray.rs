@@ -1,5 +1,5 @@
 use serde_json::Value;
-use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
@@ -98,6 +98,15 @@ pub(crate) fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         return Err(std::io::Error::other("forced tray creation failure").into());
     }
     let widget_toggle = MenuItem::with_id(app, "tray_widget", "Hide widget", true, None::<&str>)?;
+    // Click-through always starts off; kept in sync by widget.rs.
+    let click_through = CheckMenuItem::with_id(
+        app,
+        crate::widget::TRAY_CLICK_THROUGH_ID,
+        "Click-through widget",
+        true,
+        false,
+        None::<&str>,
+    )?;
     let secs = app.state::<Shell>().snooze_secs();
     let snooze = MenuItem::with_id(app, "tray_snooze", snooze_label(secs), true, None::<&str>)?;
     let test = SubmenuBuilder::new(app, "Test alert")
@@ -108,6 +117,7 @@ pub(crate) fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
         .text("tray_show", "Show dashboard")
         .item(&widget_toggle)
+        .item(&click_through)
         .item(&snooze)
         .text("tray_acknowledge", "I'm checking (acknowledge)")
         .item(&test)
@@ -116,6 +126,7 @@ pub(crate) fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .build()?;
     *app.state::<Shell>().widget_toggle.lock().unwrap() = Some(widget_toggle);
     *app.state::<Shell>().snooze_item.lock().unwrap() = Some(snooze);
+    app.state::<crate::widget::WidgetState>().set_tray_item(click_through);
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Owlet Dashboard")
         .menu(&menu)
@@ -169,7 +180,10 @@ pub(crate) fn handle_menu(app: &AppHandle, id: &str) {
             std::thread::spawn(move || do_test_alert(level));
         }
         "tray_quit" => app.exit(0),
-        _ => {}
+        // Widget right-click menu and the tray's click-through entry.
+        _ => {
+            crate::widget::handle_menu(app, id);
+        }
     }
 }
 

@@ -44,6 +44,7 @@ function page(path, {
   let failure = false;
   let overlayListener;
   let resizeListener = () => {};
+  const docListeners = {};
   let now = 1800000000000;
   const snooze = () => {
     response = { ...response, active_level: 'none', snoozed: true, snooze_seconds_left: 15 };
@@ -67,7 +68,10 @@ function page(path, {
   win.addEventListener = (name, fn) => { if (name === 'resize') resizeListener = fn; };
   vm.runInNewContext(script(path), {
     window: win,
-    document: { getElementById: element, addEventListener() {} },
+    document: {
+      getElementById: element,
+      addEventListener: (name, fn) => { docListeners[name] = fn; },
+    },
     Date: { now: () => now, parse: Date.parse },
     setInterval: (fn, ms) => intervals.set(ms, fn),
     fetch: async (url, options) => {
@@ -88,6 +92,7 @@ function page(path, {
     resize: (w, h) => { win.innerWidth = w; win.innerHeight = h; resizeListener(); },
     poll: async () => { await p_poll(intervals); },
     now: () => now,
+    docListeners,
   };
 }
 async function p_poll(intervals) { await intervals.get(2000)(); await flush(); }
@@ -829,3 +834,20 @@ test('expanded timer never sits beside a desktop alert-status problem', async ()
   assert.equal(p.element('status').textContent, 'Updated 0s ago');
   assert.equal(timer(p), 'Asleep 2h 14m');
 });
+
+for (const desktop of [true, false]) {
+  test(`right-click ${desktop ? 'opens the native widget menu' : 'is left alone in a browser'}`, async () => {
+    const p = page('app/widget_page.py', { desktop });
+    await flush();
+    if (!desktop) {
+      assert.equal(p.docListeners.contextmenu, undefined);
+      assert.ok(!p.calls.includes('show_widget_menu'));
+      return;
+    }
+    let prevented = false;
+    p.docListeners.contextmenu({ preventDefault: () => { prevented = true; } });
+    await flush();
+    assert.ok(prevented);
+    assert.equal(p.calls.filter((c) => c === 'show_widget_menu').length, 1);
+  });
+}

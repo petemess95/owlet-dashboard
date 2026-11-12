@@ -254,6 +254,11 @@ WIDGET_HTML = r"""<!doctype html>
       if (e.button !== 0 || e.target.closest("button")) return;
       try { T.window.getCurrentWindow().startDragging(); } catch (err) {}
     });
+    // Right-click: the shell's native menu (size, opacity, click-through...).
+    document.addEventListener("contextmenu", function (e) {
+      e.preventDefault();
+      invoke("show_widget_menu").catch(function () {});
+    });
   }
 
   // The one snooze path, shared by the compact/expanded button and the micro one.

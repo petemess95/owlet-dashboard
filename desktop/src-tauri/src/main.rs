@@ -16,6 +16,7 @@ mod http;
 mod overlay;
 mod settings;
 mod tray;
+mod widget;
 
 use alert_loop::AppliedState;
 
@@ -36,7 +37,7 @@ use tauri::{
 };
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_window_state::StateFlags;
+use tauri_plugin_window_state::{StateFlags, WindowExt};
 
 pub(crate) const SERVER_ADDR: (&str, u16) = ("127.0.0.1", 8877);
 const WIDGET_W: f64 = 300.0;
@@ -300,8 +301,12 @@ fn build_widget(app: &tauri::App) -> tauri::Result<WebviewWindow> {
         builder = builder.position(pos.x as f64 / scale, pos.y as f64 / scale);
     }
     let win = builder.build()?;
-    // The window-state plugin restores a saved position on creation; if that
-    // monitor is gone, bring the widget back on-screen.
+    // Only the position is restored for the widget (it is skipped by the
+    // plugin's initial restore): its size always comes from widget_size.
+    if let Err(err) = win.restore_state(StateFlags::POSITION) {
+        log_line(&format!("widget position restore failed: {err}"));
+    }
+    // If the saved position's monitor is gone, bring the widget back on-screen.
     if let (Ok(pos), Some(default_pos)) = (win.outer_position(), default_pos) {
         let center = PhysicalPosition::new(pos.x + 20, pos.y + 20);
         if !on_any_monitor(handle, center) {
@@ -335,6 +340,7 @@ fn main() {
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED)
                 .with_filter(|label| !overlay::is_overlay_label(label))
+                .skip_initial_state(widget::LABEL)
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
@@ -349,11 +355,14 @@ fn main() {
             commands::list_monitors,
             commands::list_audio_devices,
             commands::armed_state,
-            commands::capture_controller_button
+            commands::capture_controller_button,
+            commands::set_widget_mode,
+            commands::show_widget_menu
         ])
         .manage(ServerProcess(Mutex::new(None)))
         .manage(Shell::default())
         .manage(hotkeys::Hotkeys::default())
+        .manage(widget::WidgetState::default())
         .manage(settings::DesktopSettings::new(settings::Settings::default()))
         .on_menu_event(|app, event| tray::handle_menu(app, event.id().as_ref()))
         .setup(|app| {
@@ -403,9 +412,12 @@ fn main() {
                 Ok(()) => app.state::<Shell>().tray_available.store(true, Ordering::SeqCst),
                 Err(err) => log_line(&format!("tray creation failed: {err}")),
             }
-            if let Err(err) = build_widget(app) {
-                log_line(&format!("widget creation failed: {err}"));
+            match build_widget(app) {
+                // Saved size and opacity, now the position is restored.
+                Ok(_) => widget::apply_startup(app.handle()),
+                Err(err) => log_line(&format!("widget creation failed: {err}")),
             }
+            widget::spawn_snapper(app.handle().clone());
             tray::sync_widget_toggle(app.handle());
             let handle = app.handle().clone();
             std::thread::Builder::new()
@@ -416,6 +428,14 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == widget::LABEL {
+                match event {
+                    tauri::WindowEvent::Moved(_) => widget::moved(window.app_handle()),
+                    // A restore or resize can rewrite the window style.
+                    tauri::WindowEvent::Resized(_) => widget::reassert_opacity(window.app_handle()),
+                    _ => {}
+                }
+            }
             // Without a tray, closing the dashboard must remain a way to quit.
             // RunEvent::Exit stops the alarm and sidecar on either exit path.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

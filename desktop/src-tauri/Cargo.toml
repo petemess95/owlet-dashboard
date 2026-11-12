@@ -23,6 +23,8 @@ serde_json = "1"
 # Win32_Media_Audio(+Endpoints), System_Com*, Variant, PropertiesSystem,
 # FunctionDiscovery: WASAPI red alarm, endpoint volume and device names;
 # PlaySoundW remains as the fallback.
+# Win32_UI_WindowsAndMessaging: widget opacity (WS_EX_LAYERED alpha);
+# Win32_UI_Input_KeyboardAndMouse: edge snapping waits for the mouse button.
 # Win32_System_Power: SetThreadExecutionState keep-awake while monitoring.
 # Win32_UI_Input_XboxController: XInputGetState for controller snooze.
 # Win32_Devices_HumanInterfaceDevice/DeviceAndDriverInstallation,
@@ -46,6 +48,8 @@ windows = { version = "0.61", features = [
     "Win32_System_IO",
     "Win32_System_Threading",
     "Win32_Security",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }
 # We call this crate directly instead of tauri-plugin-notification: the plugin
 # routes through notify-rust, whose show() registers activation handlers on a
