@@ -4,11 +4,25 @@ The missing Owlet desktop app — an **unofficial**, open-source, provided-as-is
 collector and dashboard for Owlet Dream Sock / Smart Sock data. Not affiliated with or
 endorsed by Owlet Baby Care.
 
-Owlet Dashboard stores local historical vitals from the unofficial Owlet cloud API and shows oxygen, heart-rate, movement, and sleep/wake trends in a private web dashboard. It is designed for parents who want retrospective history beyond the short recent window shown in the Owlet app.
+Owlet Dashboard stores local historical vitals from the unofficial Owlet cloud API and shows oxygen, heart-rate, movement, and sleep/wake trends in a private web dashboard. It is designed for parents who want retrospective history beyond the short recent window shown in the Owlet app. The Windows desktop app also adds an **extra** low-oxygen alert on the PC (a small always-on-top widget, a screen flash and an alarm sound), meant to be heard and seen while you game or work. It supplements the Owlet base station; it never replaces it.
 
 The Owlet app only exposes a short recent window. This server polls Owlet's unofficial cloud API via [`pyowletapi`](https://pypi.org/project/pyowletapi/), stores readings locally, and serves a simple historical dashboard.
 
-> Safety note: this is for retrospective trend viewing only. Do **not** use it as a medical alerting system or as a replacement for the Owlet app/base station.
+> ## Not a medical alarm
+>
+> Owlet Dashboard is **not a medical device and not a medical alarm**. It must never be
+> your only way of knowing your baby is in trouble.
+>
+> - It depends on **Owlet's cloud, your internet connection and this PC** (or your
+>   server). If any of them fails, alerts stop, and the app may not be able to tell you.
+> - **The Owlet base station stays the primary alarm.** Keep it plugged in, in the
+>   room, and turned up. Nothing here replaces it or the Owlet app.
+> - The green "armed" indicator in the desktop app means one thing only: **this PC's
+>   alert path is working** (the server answers, data is fresh, sound can play, the PC
+>   is staying awake). It says nothing about your baby, and it can't see failures on
+>   Owlet's side or in your network.
+> - The history, charts and reports are for looking back at trends, not for making
+>   medical decisions. Talk to your paediatrician about readings you are worried about.
 
 ## Screenshots
 
@@ -48,8 +62,42 @@ Only run one collector per Owlet login: two collectors refresh the same Owlet to
 sign each other out. So if you have the server, use **Connect to a live server** rather
 than _Collect on this PC_. You can switch modes anytime from the window's **Instance** menu.
 
+The desktop app is also where the PC alerts live. Before relying on them, open
+**Settings → This PC** and press **Test amber** and **Test red**: you should see the flash
+and hear the alarm. Then read [`desktop/README.md`](desktop/README.md), which explains
+every alert setting and what the armed indicator means.
+
 Prefer to compile it yourself? Build steps live in
 [`desktop/README.md`](desktop/README.md) (PyInstaller sidecar + Tauri shell).
+
+## What's new in 0.2 (Windows desktop app)
+
+Version 0.2 is about trusting the extra alert on your PC, and a new look. Full details
+and every setting are in [`desktop/README.md`](desktop/README.md).
+
+- **Alert settings** (Settings → Alerts, works in the desktop app and the hosted
+  dashboard): how long Snooze lasts (5–120 s, default 15), how old the newest reading
+  may be before the app warns that data has stopped (30–300 s, default 60), and an
+  optional gentle **awake chime** (off by default) when your baby changes from asleep
+  to awake.
+- **Settings → This PC** (desktop app only): which monitor flashes, the alarm sound and
+  speaker, an option that unmutes this PC and raises the volume on a red alert (on by
+  default, restored afterwards), keep the PC awake while collecting, start with Windows,
+  a game mode, hiding the widget from screen sharing, test buttons and a first-run
+  "test your alerts" step.
+- **"I'm checking"**: a longer silence than Snooze, for when you are already on your
+  way. Escalation from amber to red still breaks through.
+- **Hotkeys and controller snooze**: snooze, "I'm checking", show/hide widget and
+  click-through from the keyboard, and snooze from a game controller (Xbox, and
+  PlayStation DualShock 4 / DualSense) while a game has focus. Both are off until you
+  set them.
+- **A better widget**: three sizes, adjustable opacity, click-through, edge snapping, an
+  armed dot, and a live tray icon that shows the current SpO₂ in the alert-tier colour.
+- **Armed indicator** on the widget, the tray tooltip and the dashboard, with a plain
+  sentence when something is wrong ("Windows is muted", "PC may sleep", "No data for
+  3m"). Remember what it does and does not mean (see the box at the top).
+- **A new night-sky look** across the dashboard, widget and alert overlay, with bundled
+  fonts so it works offline. Dark is the default and light is kept.
 
 ## What it stores
 
