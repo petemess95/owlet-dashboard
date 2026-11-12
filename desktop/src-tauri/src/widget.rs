@@ -20,7 +20,7 @@ use crate::log_line;
 
 pub(crate) const LABEL: &str = "widget";
 /// Snap distance in physical pixels (not scaled by DPI).
-pub(crate) const SNAP_PX: i32 = 12;
+pub(crate) const SNAP_PX: i32 = 32;
 const SNAP_DEBOUNCE: Duration = Duration::from_millis(250);
 pub(crate) const OPACITY_CHOICES: [u8; 4] = [100, 80, 60, 40];
 pub(crate) const CLICK_THROUGH_MENU_LABEL: &str = "Click-through (turn off from tray or hotkey)";
@@ -734,7 +734,7 @@ mod tests {
     }
 
     #[test]
-    fn snaps_each_edge_within_12_px() {
+    fn snaps_each_edge_within_32_px() {
         let w = |x, y| Rect::new(x, y, 300, 120);
         assert_eq!(snap_position(w(12, 500), WORK, SNAP_PX), (0, 500));
         assert_eq!(snap_position(w(-7, 500), WORK, SNAP_PX), (0, 500));
@@ -752,10 +752,10 @@ mod tests {
     }
 
     #[test]
-    fn does_not_snap_at_13_px() {
+    fn does_not_snap_at_33_px() {
         let w = |x, y| Rect::new(x, y, 300, 120);
-        assert_eq!(snap_position(w(13, 13), WORK, SNAP_PX), (13, 13));
-        assert_eq!(snap_position(w(1920 - 300 - 13, 1040 - 120 - 13), WORK, SNAP_PX), (1607, 907));
+        assert_eq!(snap_position(w(33, 33), WORK, SNAP_PX), (33, 33));
+        assert_eq!(snap_position(w(1920 - 300 - 33, 1040 - 120 - 33), WORK, SNAP_PX), (1587, 887));
     }
 
     #[test]
@@ -835,10 +835,10 @@ mod tests {
         // The outer position sent for the right edge: border hangs past it.
         let (outer, visible) = framed(1610, 500);
         assert_eq!(snap_outer(outer, visible, &mons), Some((1612, 500)));
-        // Nothing within 12 px: no move.
-        let (outer, visible) = framed(13, 13);
+        // Nothing within 32 px: no move.
+        let (outer, visible) = framed(33, 33);
         assert_eq!(snap_outer(outer, visible, &mons), None);
-        let (outer, visible) = framed(1920 - 300 - 13, 1040 - 120 - 13);
+        let (outer, visible) = framed(1920 - 300 - 33, 1040 - 120 - 33);
         assert_eq!(snap_outer(outer, visible, &mons), None);
     }
 

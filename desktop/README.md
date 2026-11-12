@@ -136,7 +136,7 @@ D-pad = D-pad. The PS button and the touchpad click have their own entries. Trig
 ### The widget and the tray
 
 The widget is a small always-on-top window. Drag it anywhere; it snaps to a monitor's
-edge when you let go within 12 pixels of it. Right-click it for the menu: size, opacity,
+edge when you let go within 32 pixels of it. Right-click it for the menu: size, opacity,
 click-through, test alert, open dashboard, hide.
 
 - **Sizes:** *micro* (a small pill such as `97 · 147`: SpO₂ and pulse), *compact*
