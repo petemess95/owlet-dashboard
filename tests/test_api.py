@@ -1023,8 +1023,11 @@ async def test_night_and_rhythms_pages_are_session_gated(tmp_path):
         assert "/api/rollups?bucket=5m" in night_js
         rhythms = client.get("/rhythms")
         assert rhythms.status_code == 200
-        assert "Two weeks, half-hour by half-hour" in rhythms.text
-        assert "/api/rollups?bucket=30m" in rhythms.text
+        assert '<link rel="stylesheet" href="/static/pages/rhythms.css" />' in rhythms.text
+        assert '<script src="/static/pages/rhythms.js"></script>' in rhythms.text
+        rhythms_js = client.get("/static/pages/rhythms.js").text
+        assert "Two weeks, half-hour by half-hour" in rhythms_js
+        assert "/api/rollups?bucket=30m" in rhythms_js
 
 
 @pytest.mark.asyncio

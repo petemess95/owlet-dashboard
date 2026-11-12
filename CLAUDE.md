@@ -30,7 +30,7 @@ Python strings of HTML/CSS/JS. Branch `v0.2`. Safety-critical: the low-oxygen al
 | Today page (`/`) | `app/now_page.py` (`NOW_HEAD` css, `NOW_BODY` html, `NOW_SCRIPTS` js) |
 | Tonight page (`/night`) | css `app/static/pages/night.css`, js `app/static/pages/night.js`; html in `app/night_page.py` (`NIGHT_BODY`) |
 | Page CSS/JS files (`app/static/pages/*.{css,js}`) | served by `page_asset` in `app/main.py` at `/static/pages/<name>` (public, `no-cache`) |
-| Rhythms page (`/rhythms`) | `app/rhythms_page.py` (`RHYTHMS_*`) |
+| Rhythms page (`/rhythms`) | css `app/static/pages/rhythms.css`, js `app/static/pages/rhythms.js`; html in `app/rhythms_page.py` (`RHYTHMS_BODY`) |
 | Data workbench (`/data`, share pages) | `app/dashboard.py` (`DATA_HEAD`, `DATA_BODY`, `render_dashboard`) |
 | Always-on-top widget page (`/widget`) | `app/widget_page.py` (`WIDGET_HTML`) |
 | Colours / fonts / PWA | `app/static/theme.css`, `static/fonts`, `app/pwa.py` |
