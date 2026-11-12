@@ -1,67 +1,221 @@
 <!doctype html>
 <!-- Monitor-flash alert overlay. The Rust alert thread positions this window over
-     a monitor and pushes state via the "overlay-state" event. 1 Hz flash (well
-     under the 3 Hz photosensitivity guideline). Click anywhere = snooze 15 s. -->
+     a monitor and pushes state via the "overlay-state" event (on load the page
+     also asks with invoke("overlay_state")). 1 Hz flash: lit/unlit every 500 ms,
+     well under the 3 Hz photosensitivity guideline.
+     mode "fullscreen": mousedown anywhere = snooze for the payload's
+       snooze_seconds; the "I'm checking" button = acknowledge instead.
+     mode "border": click-through frame (the window ignores the mouse); text only
+       when the signal is lost. -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <title>Owlet alert</title>
 <style>
+  /* Bundled copy of the dashboard's sans (app/static/fonts), so the overlay
+     renders in the shared typeface with no network. "swap" so alert text is
+     never invisible while the font loads. */
+  @font-face { font-family: "Source Sans 3"; font-style: normal; font-weight: 600; font-display: swap;
+    src: url("fonts/source-sans-3-latin-600-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Source Sans 3"; font-style: normal; font-weight: 700; font-display: swap;
+    src: url("fonts/source-sans-3-latin-700-normal.woff2") format("woff2"); }
+
+  /* Values copied from app/static/theme.css, dark theme (plan v0.2 §7 D2).
+     This page is bundled with the shell and can't load theme.css; keep these in
+     sync by hand. The overlay stays dark in both themes, so only dark values. */
+  :root {
+    --bg: #070925;
+    --surface: #121442;
+    --surface-line: rgba(190, 195, 255, .13);
+    --ink: #e7e7fb;
+    --dim: #a9acd9;
+    --on-accent: #0b0d33;
+    --warn: #ffcf66;                       /* amber tier */
+    --bad: #ff7b7b;                        /* red tier */
+    --radius-card: 28px;
+    --radius-control: 999px;
+    /* Overlay-only mixes of the values above. Lit: the tier colour almost
+       opaque (v0.1 was 55%), so it can't be missed over any desktop or game.
+       Unlit: --bg as a dark veil, so the flash swings bright/dark whatever is
+       behind it and the card text stays readable in both phases. */
+    --warn-tint: rgba(255, 207, 102, .84);
+    --bad-tint: rgba(255, 123, 123, .84);
+    --veil: rgba(7, 9, 37, .72);
+    --frame-unlit: rgba(7, 9, 37, .6);
+    --card: rgba(18, 20, 66, .96);
+    --sans: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  }
+
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
-    font-family: "Segoe UI", system-ui, sans-serif; cursor: pointer; user-select: none; }
-  #flash { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-    flex-direction: column; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.6); }
+    font-family: var(--sans); cursor: pointer; user-select: none; color: var(--ink); }
+
+  #flash { position: fixed; inset: 0; display: none; }
   #flash.on { display: flex; }
-  #flash.full.lit { background: var(--c); }
-  #flash.border { pointer-events: none; box-sizing: border-box; border: 40px solid transparent; }
-  #flash.border.lit { border-color: var(--c); }
-  #flash.border .txt { display: none; }
-  #flash.border.signal-lost .txt { display: block; background: rgba(0,0,0,.8); padding: 8px; }
-  #flash.border.signal-lost .big { font-size: 6vh; }
-  #flash.border.signal-lost .snooze-hint { display: none; }
-  .big { font-size: 14vh; font-weight: 800; line-height: 1; }
-  .small { font-size: 3.2vh; margin-top: 2.5vh; font-weight: 600; }
+  #flash.amber { --c: var(--warn); --tint: var(--warn-tint); }
+  #flash.red { --c: var(--bad); --tint: var(--bad-tint); }
+
+  /* ---- full screen (a whole non-primary monitor) ---- */
+  #flash.full { flex-direction: column; align-items: center; background: var(--veil); }
+  #flash.full.lit { background: var(--tint); }
+  .middle { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+
+  .card { background: var(--card); border: max(4px, .55vh) solid var(--c);
+    border-radius: max(var(--radius-card), 3.4vh); padding: 3.6vh 7vh 3vh;
+    text-align: center; max-width: 86vw; box-sizing: border-box; }
+  .status { display: flex; align-items: center; justify-content: center; gap: 1.4vh;
+    color: var(--c); font-weight: 700; font-size: 4.4vh; line-height: 1.15; letter-spacing: .01em; }
+  .status svg { width: 5.2vh; height: 5.2vh; flex: none; }
+  .reading { display: flex; align-items: flex-start; justify-content: center; gap: 1.6vh;
+    color: var(--c); margin-top: 1.2vh; }
+  .num { font-size: 25vh; font-weight: 700; line-height: .86; font-variant-numeric: tabular-nums; }
+  .side { display: flex; flex-direction: column; align-items: flex-start; padding-top: 1.6vh; }
+  .pct { font-size: 10vh; font-weight: 700; line-height: .9; }
+  .lbl { font-size: 3.8vh; font-weight: 600; color: var(--dim); margin-top: .8vh; }
+  .bigtext { font-size: 11vh; font-weight: 700; line-height: 1; color: var(--c); margin-top: 1.6vh; }
+  .msg { font-size: 3.6vh; font-weight: 600; margin-top: 2vh; line-height: 1.2; }
+  .dev { font-size: 3.2vh; font-weight: 600; color: var(--dim); margin-top: .8vh; line-height: 1.2; }
+  .msg:empty, .dev:empty { display: none; }
+  .hint { margin-top: 2.6vh; padding-top: 2.4vh; border-top: 2px solid var(--surface-line);
+    font-size: 3.8vh; font-weight: 600; line-height: 1.2; }
+
+  /* "I'm checking": its own target at the bottom of the screen, well away from
+     the centred card that a click to snooze naturally lands on. */
+  .ack { display: flex; flex-direction: column; align-items: center; gap: 1.4vh; padding: 3vh 0 6vh; }
+  .ack button { font: inherit; font-weight: 700; font-size: 4vh; color: var(--on-accent);
+    background: var(--ink); border: 0; border-radius: var(--radius-control);
+    min-height: max(64px, 9.5vh); min-width: max(320px, 30vw); padding: 0 6vh;
+    display: inline-flex; align-items: center; justify-content: center; gap: 1.6vh;
+    cursor: pointer; box-shadow: 0 0 0 max(5px, .7vh) var(--bg); transition: opacity .3s; }
+  .ack button:hover { box-shadow: 0 0 0 max(5px, .7vh) var(--bg), 0 0 0 max(9px, 1.2vh) var(--c); }
+  .ack button svg { width: 4.6vh; height: 4.6vh; flex: none; }
+  .ack .note { background: var(--card); border-radius: var(--radius-control); padding: .8vh 2.6vh;
+    font-size: 2.8vh; font-weight: 600; line-height: 1.25; }
+  /* Just after the overlay appears (or the alert changes) the button is not yet
+     live: a press there is a press on the overlay, i.e. snooze, as in v0.1. */
+  .ack.arming button { opacity: .45; pointer-events: none; }
+
+  /* ---- border (click-through frame round the primary monitor) ---- */
+  #flash.border { pointer-events: none; align-items: center; justify-content: center; }
+  #flash.border::before { content: ""; position: fixed; inset: 48px; border-radius: var(--radius-card);
+    box-shadow: 0 0 0 6px var(--bg), 0 0 0 200vmax var(--frame-unlit); }
+  #flash.border.lit::before { box-shadow: 0 0 0 6px var(--bg), 0 0 0 200vmax var(--c); }
+  #flash.border .card, #flash.border .ack { display: none; }
+  #flash.border.signal-lost .card { display: block; position: relative; padding: 2.4vh 4.4vh; }
+  #flash.border .reading, #flash.border .bigtext, #flash.border .hint { display: none; }
+  #flash.border .status { font-size: 4.6vh; }
+  #flash.border .msg { margin-top: 1.2vh; font-size: 3vh; }
+  #flash.border .dev { font-size: 2.6vh; }
+
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <div id="flash">
-  <div class="txt big" id="big"></div>
-  <div class="txt small" id="who"></div>
-  <div class="txt small snooze-hint">Click anywhere to snooze 15 s</div>
+  <div class="middle">
+    <div class="card">
+      <div class="status">
+        <!-- Shape is a second, non-colour signal: triangle = warning, octagon = red alert. -->
+        <svg id="icon-amber" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6 23 21.4H1Z" fill="currentColor"/><path d="M12 9v6M12 17.6v.4" stroke="#0b0d33" stroke-width="2.4" stroke-linecap="round"/></svg>
+        <svg id="icon-red" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 1.5h8L22.5 8v8L16 22.5H8L1.5 16V8Z" fill="currentColor"/><path d="M12 6.5v7M12 16.8v.4" stroke="#0b0d33" stroke-width="2.6" stroke-linecap="round"/></svg>
+        <span id="status"></span>
+      </div>
+      <div class="reading" id="reading"><span class="num" id="num"></span><span class="side"><span class="pct">%</span><span class="lbl">SpO₂</span></span></div>
+      <div class="bigtext" id="bigtext"></div>
+      <div class="msg" id="msg"></div>
+      <div class="dev" id="dev"></div>
+      <div class="hint" id="hint"></div>
+    </div>
+  </div>
+  <div class="ack" id="ack">
+    <button type="button" id="ack-btn">
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12Z"/><circle cx="12" cy="12" r="3.2"/></svg>
+      I’m checking
+    </button>
+    <div class="note" id="ack-note"></div>
+  </div>
 </div>
 <script>
 (function () {
-  var COLORS = { amber: "rgba(255,140,0,.55)", red: "rgba(255,26,26,.55)" };
-  var BORDER = { amber: "#ff8c00", red: "#ff1a1a" };
+  var DEFAULT_SNOOZE = 15;
+  var ARM_MS = 1500;  // the button goes live this long after the overlay appears or changes
   var T = window.__TAURI__;
   var el = document.getElementById("flash");
-  var state = null, lit = true;
+  var ack = document.getElementById("ack");
+  var btn = document.getElementById("ack-btn");
+  var state = null, lit = true, armUntil = 0, pressed = false;
+
+  function $(id) { return document.getElementById(id); }
+  function alerting() { return !!state && (state.level === "amber" || state.level === "red"); }
+  function invoke(cmd) { if (T) T.core.invoke(cmd).catch(function () {}); }
 
   function apply(s) {
-    if (!state || !s || state.level !== s.level || state.mode !== s.mode) lit = true;
+    var fresh = !alerting() || !s || state.level !== s.level || state.mode !== s.mode;
+    if (fresh) lit = true;
     state = s;
-    if (!s || (s.level !== "amber" && s.level !== "red")) { el.className = ""; return; }
-    var border = s.mode === "border";
-    el.style.setProperty("--c", border ? BORDER[s.level] : COLORS[s.level]);
-    document.getElementById("big").textContent = s.signal_lost ? "Signal lost" : s.spo2 != null ? "SpO₂ " + s.spo2 + "%" :
-      (s.level === "red" ? "RED ALERT" : "Low oxygen");
-    document.getElementById("who").textContent = s.message || s.device_name || "";
+    if (!alerting()) { el.className = ""; return; }
+    if (fresh) { armUntil = Date.now() + ARM_MS; setTimeout(paint, ARM_MS + 20); }
+    var red = s.level === "red";
+    var secs = Number(s.snooze_seconds);
+    if (!isFinite(secs) || secs <= 0) secs = DEFAULT_SNOOZE;
+    $("icon-amber").toggleAttribute("hidden", red);  // SVG elements have no .hidden property
+    $("icon-red").toggleAttribute("hidden", !red);
+    // Full screen already says "Signal lost" in big type below the status line;
+    // the border label has only the status line, so it says it there.
+    $("status").textContent = (red ? "RED ALERT" : "WARNING") + " — " +
+      (!s.signal_lost ? "Low oxygen" : s.mode === "border" ? "Signal lost" : "No oxygen readings");
+    var hasNum = !s.signal_lost && s.spo2 != null;
+    $("reading").hidden = !hasNum;
+    $("num").textContent = hasNum ? s.spo2 : "";
+    $("bigtext").hidden = hasNum;
+    $("bigtext").textContent = s.signal_lost ? "Signal lost" : "Low oxygen";
+    $("msg").textContent = s.message || "";
+    $("dev").textContent = s.device_name && s.device_name !== s.message ? s.device_name : "";
+    $("hint").textContent = "Click anywhere to snooze " + Math.round(secs) + " s";
+    $("ack-note").textContent = s.signal_lost
+      ? "Silences until this alert clears, up to 10 minutes"
+      : "Silences until oxygen recovers, up to 10 minutes";
     paint();
   }
 
   function paint() {
-    if (!state || (state.level !== "amber" && state.level !== "red")) return;
-    el.className = "on " + (state.mode === "border" ? "border" : "full") +
+    if (!alerting()) return;
+    el.className = "on " + state.level + " " + (state.mode === "border" ? "border" : "full") +
       (state.signal_lost ? " signal-lost" : "") + (lit ? " lit" : "");
+    ack.hidden = state.mode === "border" || state.can_acknowledge !== true;
+    ack.className = "ack" + (Date.now() < armUntil ? " arming" : "");
   }
+
+  function hide() { el.className = ""; state = null; pressed = false; }
 
   setInterval(function () { lit = !lit; paint(); }, 500);
 
+  // A new press anywhere starts clean (capture phase, before the button sees it).
+  document.addEventListener("mousedown", function () { pressed = false; }, true);
+
+  // Snooze: a press of any mouse button anywhere on a full-screen overlay,
+  // except a left press on the live "I'm checking" button (stopped below).
   document.addEventListener("mousedown", function () {
-    if (!state || state.mode === "border") return;
-    el.className = "";
-    state = null;
-    if (T) T.core.invoke("snooze_alert").catch(function () {});
+    if (!alerting() || state.mode === "border") return;
+    hide();
+    invoke("snooze_alert");
+  });
+
+  // Acknowledge needs a whole left click on the button: press and release both
+  // on it. A left press on the button never snoozes; dragging off before
+  // release does nothing (the alert keeps flashing). While the button is not
+  // yet live, or for other mouse buttons, the press falls through to snooze.
+  btn.addEventListener("mousedown", function (e) {
+    if (!alerting() || e.button !== 0 || Date.now() < armUntil) return;
+    e.stopPropagation();
+    pressed = true;
+  });
+  btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    var ok = pressed;
+    pressed = false;
+    if (!ok || !alerting() || state.mode === "border" || state.can_acknowledge !== true) return;
+    hide();
+    invoke("acknowledge_alert");
   });
 
   if (T) {
