@@ -59,6 +59,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 STATIC_DIR = FilePath(__file__).parent / "static"
 _FONT_NAME = re.compile(r"[a-z0-9-]+\.woff2")
+# Page CSS/JS moved out of the Python page modules (app/static/pages/).
+_PAGE_ASSET = re.compile(r"[a-z0-9_-]+\.(css|js)")
+_PAGE_ASSET_TYPES = {"css": "text/css", "js": "application/javascript; charset=utf-8"}
 JSON_BODY = Body(default_factory=dict)
 
 
@@ -384,6 +387,21 @@ def create_app(
         return FileResponse(
             STATIC_DIR / "insights.js",
             media_type="application/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    @app.get("/static/pages/{name}")
+    async def page_asset(name: str) -> FileResponse:
+        # Public like /theme.css: page code only, no data. Share pages and the
+        # sign-in pages load it without a session. Strict name match, so no
+        # path traversal; anything not on disk is a 404.
+        match = _PAGE_ASSET.fullmatch(name)
+        path = STATIC_DIR / "pages" / name
+        if not match or not path.is_file():
+            raise HTTPException(status_code=404)
+        return FileResponse(
+            path,
+            media_type=_PAGE_ASSET_TYPES[match.group(1)],
             headers={"Cache-Control": "no-cache"},
         )
 

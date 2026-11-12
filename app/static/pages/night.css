@@ -1,0 +1,185 @@
+
+    /* Page-local tokens (candidates for theme.css): the radius of an inset
+       well inside a card, and the timeline's row heights. */
+    .shell-main { --night-well-radius: 18px; --tl-o2-h: 104px; --tl-stage-h: 72px; }
+
+    /* night picker: a pill capsule, the same control language as the top bar */
+    .night-nav { display: inline-flex; align-items: center; gap: 4px; padding: 4px;
+      max-width: 100%; border-radius: var(--radius-pill); background: var(--pill-track); }
+    .night-nav button { all: unset; box-sizing: border-box; cursor: pointer; flex: none;
+      width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%;
+      color: var(--ink); }
+    .night-nav button svg { width: 16px; height: 16px; }
+    .night-nav button:hover:not(:disabled) { background: var(--pill-hover); }
+    .night-nav button:disabled { opacity: .35; cursor: default; }
+    .night-when { min-width: 0; padding: 0 10px; font-size: 15px; line-height: 1.3;
+      color: var(--dim); text-align: center; }
+    .night-when b { color: var(--ink); font-weight: 700; margin-right: 6px; }
+
+    /* the one-line story */
+    h1.headline { font-family: var(--font-serif); font-weight: 400;
+      font-size: clamp(34px, 6vw, 56px); line-height: 1.08; letter-spacing: -0.01em;
+      margin: 22px 0 0; color: var(--ink); }
+    h1.headline b { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .lede { font-size: 18px; line-height: 1.55; color: var(--dim); margin: 14px 0 30px;
+      max-width: 62ch; }
+    .lede b { color: var(--ink); font-weight: 600; }
+
+    .card-title { font-size: 21px; font-weight: 700; margin: 0; color: var(--ink); }
+    .card-head { display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 4px 16px; margin-bottom: 16px; }
+    .card-head a { color: var(--accent); text-decoration: none; font-size: 15px; font-weight: 600; }
+    .card-head a:hover { text-decoration: underline; }
+
+    /* ---- the night timeline: the centrepiece ---- */
+    .timeline-card { padding: 26px 28px 28px; margin-bottom: 20px; }
+    .tl-well { background: var(--surface-inset); border-radius: var(--night-well-radius);
+      padding: 14px 22px 12px; }
+    .tl-readout { min-height: 2.9em; font-size: 14px; line-height: 1.45; color: var(--dim);
+      font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+    .tl-readout b { color: var(--ink); font-weight: 600; }
+    .tl-plot { position: relative; touch-action: pan-y; cursor: crosshair;
+      user-select: none; -webkit-user-select: none; }
+    .tl-marks { position: relative; z-index: 3; }
+    .tl-row-label { font-size: 12.5px; font-weight: 600; color: var(--dim); margin: 6px 0 4px; }
+    .tl-row-label span { position: relative; z-index: 2; padding-right: 8px;
+      background: var(--surface-inset); }
+    .tl-o2 { position: relative; height: var(--tl-o2-h); }
+    .tl-o2 svg { display: block; width: 100%; height: 100%; overflow: visible; }
+    .tl-o2 polyline { fill: none; stroke: var(--series-o2); stroke-width: 2;
+      stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+    .tl-o2 line { stroke-width: 1.5; stroke-dasharray: 5 5; vector-effect: non-scaling-stroke; }
+    .tl-o2 line.warn { stroke: var(--warn); }
+    .tl-o2 line.bad { stroke: var(--bad); stroke-dasharray: 2 4; }
+    .tl-th { position: absolute; right: 0; transform: translateY(-100%); padding: 0 0 1px 6px;
+      font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tl-th.warn { color: var(--warn); }
+    .tl-th.bad { color: var(--bad); transform: none; padding: 1px 0 0 6px; }
+    /* sleep stages: colour AND height (taller = deeper), square-cornered bars
+       in a gently rounded strip so the first and last minutes are never clipped */
+    .tl-stages { display: flex; align-items: flex-end; height: var(--tl-stage-h);
+      border-radius: 6px; overflow: hidden; background: var(--nodata); }
+    .tl-stages span { flex: 1 1 0; min-width: 0; }
+    .tl-stages .deep { height: 100%; background: var(--sleep-deep); }
+    .tl-stages .light { height: 64%; background: var(--sleep-light); }
+    .tl-stages .awake { height: 30%; background: var(--awake); }
+    .tl-stages .nodata { height: 0; }
+
+    /* oxygen dip markers: tier colour + glyph + the number, never colour alone */
+    .tl-dip { all: unset; box-sizing: border-box; cursor: pointer; position: absolute;
+      transform: translateX(-50%); height: 24px; padding: 0 9px; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 4px;
+      border-radius: var(--radius-pill); color: var(--on-accent);
+      font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tl-dip.warn { background: var(--warn); }
+    .tl-dip.bad { background: var(--bad); }
+    .tl-dip[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface-inset), 0 0 0 4px var(--ink);
+      z-index: 2; }
+    .tl-stem { position: absolute; bottom: var(--tl-pad, 0px); width: 0; pointer-events: none; z-index: 1;
+      border-left: 2px dashed var(--warn); }
+    .tl-stem.bad { border-left: 2px solid var(--bad); }
+    .tl-band { position: absolute; top: 0; bottom: 0; min-width: 8px; pointer-events: none;
+      border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--ink);
+      background: color-mix(in srgb, var(--ink) 12%, transparent); }
+    .tl-band[hidden], .tl-x[hidden] { display: none; }
+    .tl-x { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--dim);
+      pointer-events: none; }
+    .tl-now { position: absolute; top: 0; bottom: 0; width: 0; pointer-events: none;
+      border-left: 2px solid var(--accent); }
+    .tl-now span { position: absolute; bottom: 100%; left: 0; transform: translateX(-50%);
+      font-size: 11.5px; font-weight: 700; color: var(--accent); }
+    .tl-axis { display: flex; justify-content: space-between; font-size: 12.5px;
+      color: var(--dim); margin-top: 8px; font-variant-numeric: tabular-nums; }
+    .legend { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 18px;
+      font-size: 13.5px; color: var(--dim); margin-top: 14px; }
+    .legend i { display: inline-block; width: 10px; height: 12px; border-radius: 2px;
+      margin-right: 6px; }
+    .legend .sw-deep { background: var(--sleep-deep); }
+    .legend .sw-light { background: var(--sleep-light); height: 8px; }
+    .legend .sw-awake { background: var(--awake); height: 4px; }
+    .legend .sw-nodata { background: var(--nodata); box-shadow: inset 0 0 0 1px var(--surface-line); }
+    .legend .sw-o2 { background: var(--series-o2); height: 3px; width: 16px; vertical-align: 3px; }
+    .legend .sw-dip { width: auto; height: auto; padding: 0 6px;
+      border-radius: var(--radius-pill); background: var(--warn); color: var(--on-accent);
+      font-style: normal; font-weight: 700; font-size: 11.5px; }
+    .legend .sw-dip.bad { background: var(--bad); }
+
+    /* the event list, linked to the timeline */
+    .ev-head { display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 2px 14px; margin: 24px 0 10px; }
+    .ev-head h3 { margin: 0; font-size: 17px; font-weight: 700; }
+    .ev-head span { font-size: 13.5px; color: var(--dim); }
+    .events { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .event { display: flex; align-items: stretch; gap: 4px; font-size: 15px;
+      background: var(--surface-inset); border-radius: var(--night-well-radius); }
+    .event.selected { box-shadow: inset 0 0 0 2px var(--ink); }
+    .ev-pick { all: unset; box-sizing: border-box; cursor: pointer; flex: 1; min-width: 0;
+      display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px;
+      padding: 13px 8px 13px 16px; border-radius: var(--night-well-radius); }
+    .ev-pick:hover { background: var(--pill-hover); }
+    .ev-pick time { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums;
+      flex: 0 0 76px; }
+    .ev-text { color: var(--dim); flex: 1 1 180px; }
+    .ev-on { display: none; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+    .event.selected .ev-on { display: inline; }
+    .depth { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .event.warn .depth { color: var(--warn); }
+    .event.bad .depth { color: var(--bad); }
+    .ev-trace { flex: none; display: flex; align-items: center; padding: 0 16px 0 10px;
+      color: var(--accent); font-size: 14px; font-weight: 600; text-decoration: none;
+      white-space: nowrap; border-radius: var(--night-well-radius); }
+    .ev-trace:hover { text-decoration: underline; }
+    .event.fine { padding: 13px 16px; color: var(--dim); gap: 8px; }
+    .event.fine .tick { color: var(--good); font-weight: 700; }
+
+    /* the numbers */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 20px; }
+    .stat { padding: 20px 22px 18px; }
+    .stat b { display: block; font-size: clamp(26px, 3.4vw, 34px); font-weight: 700;
+      letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+    .stat span { font-size: 14px; color: var(--dim); }
+    .stat .sub { font-size: 13px; color: var(--dim); margin-top: 4px; display: block; }
+    .stat.o2 b { color: var(--series-o2); }
+    .stat.hr b { color: var(--series-hr); }
+    .stat.alert b, .stat.alert .flag { color: var(--bad); }
+    .stat.warnish b, .stat.warnish .flag { color: var(--warn); }
+    .stat .flag { font-weight: 700; }
+
+    .week { padding: 26px 28px; }
+    .week-bars { display: flex; align-items: flex-end; gap: 10px; height: 104px; margin-top: 16px; }
+    .wb { flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
+      align-items: center; gap: 6px; height: 100%; min-width: 0; }
+    .wb i { display: flex; flex-direction: column; width: 100%; max-width: 46px;
+      border-radius: 6px 6px 2px 2px; overflow: hidden; min-height: 3px; }
+    .wb i u { display: block; }
+    .wb i .lt { background: var(--sleep-light); flex-grow: 1; }
+    .wb i .dp { background: var(--sleep-deep); }
+    .wb span { font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+    .wb.shown span { color: var(--ink); font-weight: 700;
+      text-decoration: underline; text-underline-offset: 3px; }
+    .wb b { font-size: 12.5px; color: var(--dim); font-weight: 600; white-space: nowrap;
+      font-variant-numeric: tabular-nums; }
+    .week-note { font-size: 15px; color: var(--dim); line-height: 1.55; margin: 14px 0 0; }
+    .week-note b { color: var(--ink); font-weight: 600; }
+    .empty { text-align: center; color: var(--dim); padding: 48px 24px; font-size: 16px;
+      line-height: 1.55; margin-bottom: 20px; }
+    .empty svg { display: block; width: 44px; height: 44px; margin: 0 auto 14px; color: var(--dim); }
+    .empty b { display: block; color: var(--ink); font-size: 19px; margin-bottom: 4px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap; }
+
+    @media (max-width: 640px) {
+      .shell-main { --tl-o2-h: 88px; --tl-stage-h: 60px; }
+      .timeline-card, .week { padding: 20px 16px; }
+      .tl-well { padding: 12px 14px 10px; }
+      /* phone: markers shrink to their glyph; the number is in the list below */
+      .tl-dip { padding: 0; width: 24px; justify-content: center; }
+      .tl-dip .n { display: none; }
+      .night-when b { display: block; margin: 0; }
+      .lede { font-size: 17px; }
+      .tl-axis span:nth-child(even) { display: none; }
+      .wb b { font-size: 11px; } .wb span { font-size: 11.5px; } .week-bars { gap: 5px; }
+      .ev-pick { padding-left: 14px; } .ev-trace { padding-right: 14px; }
+    }
+  

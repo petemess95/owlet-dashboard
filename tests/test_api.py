@@ -889,6 +889,38 @@ async def test_bundled_fonts_are_served_and_precached(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_page_assets_are_public_no_cache_and_strictly_named(tmp_path):
+    store = ReadingStore(tmp_path / "owlet.sqlite3")
+    app = create_app(store=store, settings=_test_settings(), start_poller=False)
+
+    # No session: share pages and sign-in pages must be able to load these.
+    with client_for(app) as anon:
+        css = anon.get("/static/pages/night.css")
+        js = anon.get("/static/pages/night.js")
+        rejected = [
+            anon.get(path).status_code
+            for path in (
+                "/static/pages/missing.js",
+                "/static/pages/night.CSS",
+                "/static/pages/night.css.map",
+                "/static/pages/..%2Ftheme.css",
+                "/static/pages/%2E%2E%2F..%2Fmain.py",
+                "/static/pages/..%5C..%5Cmain.py",
+                "/static/pages/night",
+            )
+        ]
+        worker = anon.get("/sw.js").text
+
+    assert css.status_code == 200 and css.headers["content-type"].startswith("text/css")
+    assert js.status_code == 200 and js.headers["content-type"].startswith("application/javascript")
+    assert css.headers["cache-control"] == js.headers["cache-control"] == "no-cache"
+    assert rejected == [404] * len(rejected)
+    # They change every release: never cache-first in the service worker.
+    immutable = worker.split("const IMMUTABLE = [", 1)[1].split("];", 1)[0]
+    assert "/static/pages/" not in immutable
+
+
+@pytest.mark.asyncio
 async def test_share_link_serves_read_only_dashboard_and_api_without_basic_auth(tmp_path):
     store = ReadingStore(tmp_path / "owlet.sqlite3")
     await store.init()
@@ -984,8 +1016,11 @@ async def test_night_and_rhythms_pages_are_session_gated(tmp_path):
     with client_for(app, session) as client:
         night = client.get("/night")
         assert night.status_code == 200
-        assert "The night, minute by minute" in night.text
-        assert "/api/rollups?bucket=5m" in night.text
+        assert '<link rel="stylesheet" href="/static/pages/night.css" />' in night.text
+        assert '<script src="/static/pages/night.js"></script>' in night.text
+        night_js = client.get("/static/pages/night.js").text
+        assert "The night, minute by minute" in night_js
+        assert "/api/rollups?bucket=5m" in night_js
         rhythms = client.get("/rhythms")
         assert rhythms.status_code == 200
         assert "Two weeks, half-hour by half-hour" in rhythms.text
