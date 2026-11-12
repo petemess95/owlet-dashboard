@@ -202,25 +202,9 @@ cargo tauri build                                  # NSIS installer in target\re
 Versions: the app, the Python package and the Tauri config are all **0.2.0**
 (`pyproject.toml`, `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml`).
 
-**Known problem: `build-sidecar.ps1` fails under Windows PowerShell 5.1.** PyInstaller
-writes its INFO log to stderr, and the script sets `$ErrorActionPreference = "Stop"`, so
-the first log line aborts it. A fix is pending. Until then, run the same PyInstaller
-command from bash (Git Bash) or PowerShell 7, from the repository root, and do the copy
-by hand:
-
-```bash
-.venv/Scripts/pyinstaller --onefile --name owlet-server \
-  --distpath desktop/dist --workpath desktop/build --specpath desktop \
-  --paths . --collect-submodules uvicorn --collect-submodules app \
-  --collect-data tzdata --collect-data app \
-  --hidden-import aiosqlite --noconfirm desktop/server_entry.py
-mkdir -p desktop/src-tauri/binaries
-cp -f desktop/dist/owlet-server.exe desktop/src-tauri/binaries/owlet-server-x86_64-pc-windows-msvc.exe
-```
-
-That is all the script does: freeze the server, then copy it into
-`desktop/src-tauri/binaries/` under the target-triple name Tauri requires. If the
-script's options change, change this command to match.
+`build-sidecar.ps1` works in both Windows PowerShell 5.1 and PowerShell 7. All it does
+is freeze the server with PyInstaller, then copy it into `desktop/src-tauri/binaries/`
+under the target-triple name Tauri requires.
 
 **Regenerating the web icons.** `scripts/generate_icons.py` redraws the icons in
 `app/static` and needs Pillow, which the project `.venv` does not include. Install it
