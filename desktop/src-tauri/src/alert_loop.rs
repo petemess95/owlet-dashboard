@@ -107,7 +107,7 @@ pub(crate) fn alert_loop(app: AppHandle) {
             let detected = &app.state::<Shell>().game_detected;
             let next = crate::gamemode::next_detection(
                 detected.load(Ordering::SeqCst),
-                crate::gamemode::foreground_is_ours(),
+                crate::overlay::overlay_showing() || crate::gamemode::foreground_is_ours(),
                 crate::gamemode::detect_fullscreen,
             );
             detected.store(next, Ordering::SeqCst);

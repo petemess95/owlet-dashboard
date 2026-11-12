@@ -4,6 +4,8 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::{log_line, Shell};
 
 // ---------------------------------------------------------------------------
@@ -193,6 +195,24 @@ pub(crate) fn overlay_payload(state: &Value, dev: Option<&Value>, t: Target) -> 
     })
 }
 
+/// True from show_overlays until hide_overlay: our own fullscreen topmost
+/// windows are up, so a fullscreen reading would only be detecting us.
+static OVERLAY_SHOWING: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn overlay_showing() -> bool {
+    OVERLAY_SHOWING.load(Ordering::SeqCst)
+}
+
+/// The payload addressed to one overlay window. The page ignores an event
+/// whose label is not its own (a global JS listener hears every emit_to).
+pub(crate) fn with_label(payload: &Value, label: &str) -> Value {
+    let mut p = payload.clone();
+    if let Some(obj) = p.as_object_mut() {
+        obj.insert("label".into(), json!(label));
+    }
+    p
+}
+
 fn overlay_windows(app: &AppHandle) -> Vec<WebviewWindow> {
     app.webview_windows().into_iter().filter(|(l, _)| is_overlay_label(l)).map(|(_, w)| w).collect()
 }
@@ -201,9 +221,11 @@ fn overlay_windows(app: &AppHandle) -> Vec<WebviewWindow> {
 /// A window that fails to create is logged and skipped; the others still
 /// show. Overlay windows beyond the target count are hidden.
 pub(crate) fn show_overlays(app: &AppHandle, shown: &[(Target, Value)]) {
+    OVERLAY_SHOWING.store(!shown.is_empty(), Ordering::SeqCst);
     let labels: Vec<String> = (0..shown.len()).map(overlay_label).collect();
     hide_surplus(app, &labels);
     for (label, (t, payload)) in labels.iter().zip(shown) {
+        let payload = &with_label(payload, label);
         let Some(win) = ensure_overlay(app, label) else { continue };
         app.state::<Shell>().overlay_payload.lock().unwrap().insert(label.clone(), payload.clone());
         place_overlay(&win, *t);
@@ -219,6 +241,7 @@ pub(crate) fn show_overlays(app: &AppHandle, shown: &[(Target, Value)]) {
 pub(crate) fn update_overlay_text(app: &AppHandle, shown: &[(Target, Value)]) {
     for (i, (_, payload)) in shown.iter().enumerate() {
         let label = overlay_label(i);
+        let payload = &with_label(payload, &label);
         app.state::<Shell>().overlay_payload.lock().unwrap().insert(label.clone(), payload.clone());
         let _ = app.emit_to(label.as_str(), "overlay-state", payload.clone());
     }
@@ -239,6 +262,7 @@ fn hide_surplus(app: &AppHandle, keep: &[String]) {
 
 /// Hides every overlay window together (snooze, acknowledge, alert end).
 pub(crate) fn hide_overlay(app: &AppHandle) {
+    OVERLAY_SHOWING.store(false, Ordering::SeqCst);
     app.state::<Shell>().overlay_payload.lock().unwrap().clear();
     hide_surplus(app, &[]);
 }
@@ -349,6 +373,16 @@ mod tests {
         let ms = [mon("A", 100, 0), mon("B", 2020, 0)];
         assert_eq!(summary(&choose_targets(&ms, None, "all")), vec![(100, false), (2020, false)]);
         assert_eq!(summary(&choose_targets(&ms, None, "primary_border")), vec![(100, true)]);
+    }
+
+    #[test]
+    fn payload_label_is_additive() {
+        let t = Target { pos: PhysicalPosition::new(0, 0), size: PhysicalSize::new(1, 1), border: true };
+        let base = overlay_payload(&json!({ "active_level": "red" }), None, t);
+        let p = with_label(&base, "overlay-1");
+        assert_eq!(p["label"], "overlay-1");
+        assert_eq!(p["mode"], "border");
+        assert_eq!(p.as_object().unwrap().len(), base.as_object().unwrap().len() + 1);
     }
 
     #[test]

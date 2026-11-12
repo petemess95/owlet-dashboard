@@ -72,12 +72,13 @@ pub(crate) fn is_fullscreen_state(state: i32) -> bool {
     matches!(state, 2 | 3)
 }
 
-/// The next `game_detected` value. While our own window (the overlay, which
-/// covers a monitor and is always on top) is foreground, Windows reports
-/// QUNS_BUSY because of us, so no new reading is taken and the previous value
-/// stands: a game already detected keeps every monitor flashing.
-pub(crate) fn next_detection(previous: bool, foreground_is_ours: bool, quns_fullscreen: impl FnOnce() -> bool) -> bool {
-    if foreground_is_ours {
+/// The next `game_detected` value. While one of our windows is in the way
+/// (ours is foreground, or an overlay, a fullscreen topmost window, is up)
+/// Windows may report QUNS_BUSY because of us, so no new reading is taken and
+/// the previous value stands: a game detected before an alert keeps every
+/// monitor flashing; a game started mid-alert is picked up after it.
+pub(crate) fn next_detection(previous: bool, ours_in_way: bool, quns_fullscreen: impl FnOnce() -> bool) -> bool {
+    if ours_in_way {
         previous
     } else {
         quns_fullscreen()

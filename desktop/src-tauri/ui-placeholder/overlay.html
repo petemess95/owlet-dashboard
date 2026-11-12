@@ -220,7 +220,17 @@
   });
 
   if (T) {
-    T.event.listen("overlay-state", function (e) { apply(e.payload); });
+    // A global listener hears every overlay window's emit_to, so each
+    // payload carries the label it is for; anything else is ignored. If this
+    // window's label cannot be read, every payload is applied (v0.1 behaviour)
+    // rather than none.
+    var myLabel = null;
+    try { myLabel = T.webviewWindow.getCurrentWebviewWindow().label; } catch (err) { myLabel = null; }
+    T.event.listen("overlay-state", function (e) {
+      var p = e.payload;
+      if (myLabel && p && typeof p.label === "string" && p.label !== myLabel) return;
+      apply(p);
+    });
     // Catch up if the first event fired before this page finished loading.
     T.core.invoke("overlay_state").then(apply).catch(function () {});
   }

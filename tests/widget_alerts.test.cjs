@@ -217,7 +217,7 @@ test('widget disconnection warning respects the last snooze until it expires', a
 // browser runs it here: document capture listeners, then the target's own,
 // then document bubble listeners unless the target stopped propagation.
 const OVERLAY = 'desktop/src-tauri/ui-placeholder/overlay.html';
-function overlayPage({ initial = { level: 'none' } } = {}) {
+function overlayPage({ initial = { level: 'none' }, label = 'overlay', bus = null } = {}) {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) {
@@ -243,7 +243,9 @@ function overlayPage({ initial = { level: 'none' } } = {}) {
       calls.push(args === undefined ? command : `${command} ${JSON.stringify(args)}`);
       if (command === 'overlay_state') return initial;
     } },
-    event: { listen: (_name, listener) => { overlayListener = listener; } },
+    // Like Tauri's global listen: hears every window's emit_to.
+    event: { listen: (_name, listener) => { overlayListener = listener; if (bus) bus.push(listener); } },
+    webviewWindow: { getCurrentWebviewWindow: () => ({ label }) },
   };
   vm.runInNewContext(script(OVERLAY), {
     window: { __TAURI__: tauri },
@@ -1099,3 +1101,31 @@ for (const desktop of [true, false]) {
     assert.equal(p.calls.filter((c) => c === 'show_widget_menu').length, 1);
   });
 }
+
+test('each overlay window applies only the payload addressed to it', async () => {
+  const bus = [];
+  const emitTo = (target, payload) => { for (const l of bus) l({ payload: { ...payload, label: target } }); };
+  const a = overlayPage({ label: 'overlay', bus });
+  const b = overlayPage({ label: 'overlay-1', bus });
+  await flush();
+  // show_overlays order: border to "overlay", then fullscreen to "overlay-1".
+  emitTo('overlay', full({ mode: 'border' }));
+  emitTo('overlay-1', full({ mode: 'fullscreen' }));
+  assert.match(a.element('flash').className, /\bborder\b/);
+  assert.doesNotMatch(a.element('flash').className, /\bfull\b/);
+  assert.match(b.element('flash').className, /\bfull\b/);
+  a.advance(ARM); b.advance(ARM);
+  // Border window: clicks do nothing; fullscreen window: click snoozes.
+  a.click(null); a.click('btn');
+  b.click(null);
+  assert.deepEqual(a.actions(), []);
+  assert.deepEqual(b.actions(), ['snooze_alert']);
+});
+
+test('an overlay whose label cannot be read still applies payloads', async () => {
+  const p = overlayPage({ label: null });
+  await flush();
+  p.intervals.get(500)();
+  p.push(full({ label: 'overlay-3' }));
+  assert.match(p.element('flash').className, /\bon amber full\b/);
+});
