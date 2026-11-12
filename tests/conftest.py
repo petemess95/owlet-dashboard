@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -34,3 +36,18 @@ def client_for(app, session_token: str | None = None) -> TestClient:
     if session_token:
         client.cookies.set("owlet_session", session_token)
     return client
+
+
+_PAGE_ASSET_REF = re.compile(r'(?:href|src)="(/static/pages/[a-z0-9_-]+\.(?:css|js))"')
+
+
+def with_page_assets(client: TestClient, html: str) -> str:
+    """The page as the browser assembles it: its HTML followed by every
+    /static/pages/ file it links (page CSS/JS that used to be inline).
+    Each linked file must be served, so a dangling link fails the test."""
+    parts = [html]
+    for path in _PAGE_ASSET_REF.findall(html):
+        response = client.get(path)
+        assert response.status_code == 200, f"{path}: {response.status_code}"
+        parts.append(response.text)
+    return "\n".join(parts)

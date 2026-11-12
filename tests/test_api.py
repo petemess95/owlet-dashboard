@@ -7,7 +7,7 @@ from app.config import Settings
 from app.main import create_app
 from app.models import normalize_reading
 from app.store import ReadingStore
-from tests.conftest import client_for, make_user
+from tests.conftest import client_for, make_user, with_page_assets
 
 
 def _test_settings(**kwargs):
@@ -530,290 +530,292 @@ async def test_dashboard_endpoint_serves_html(tmp_path):
     with client_for(app, session) as client:
         response = client.get("/data")
         home = client.get("/")
+        data_page = with_page_assets(client, response.text)
+        home_page = with_page_assets(client, home.text)
 
     assert home.status_code == 200
-    assert "status-line" in home.text          # Now page
-    assert "/insights.js" in home.text
+    assert "status-line" in home_page          # Now page
+    assert "/insights.js" in home_page
     assert response.status_code == 200
-    assert "Owlet Dashboard" in response.text
-    assert "/api/readings" in response.text
-    assert "All stored data" in response.text
-    assert '<option selected value="24">24 hours</option>' in response.text
-    assert '<option value="72">3 days</option>' in response.text
-    assert '<option value="168">7 days</option>' in response.text
-    assert '<option value="all">All stored data</option>' in response.text
-    assert 'id="profileMenuToggle"' in response.text
-    assert 'id="profileAvatar"' in response.text
-    assert 'id="profileMenu"' in response.text
-    assert 'id="showCryptoSetting"' not in response.text
-    assert "Crypto widget" not in response.text
-    assert 'id="profileCurrentName"' not in response.text
-    assert "Current profile" not in response.text
-    assert "Switch profile" not in response.text
-    assert "Display preferences" not in response.text
-    assert 'id="deviceSelect"' in response.text
-    assert 'id="accountSelect"' in response.text
-    assert 'id="addAccount"' in response.text
-    assert "Link another Owlet account" in response.text
-    assert "renderProfileMenu" in response.text
-    assert "showCryptoEnabled" not in response.text
-    assert "updateCurrentAccountPreference" in response.text
-    assert "show_crypto" not in response.text
-    assert "el('profileMenuWrap')?.classList.toggle('share-only-hidden', SHARE_MODE);" in response.text
-    assert "cluster.classList.toggle('hidden', SHARE_MODE);" in response.text
-    assert "/api/accounts" in response.text
-    assert "has_refresh_token" not in response.text
-    assert "/api/devices" in response.text
-    assert 'id="smoothing"' in response.text
-    assert '<option selected value="raw">Raw points</option>' in response.text
-    assert '<option value="5">5 min avg</option>' in response.text
-    assert 'id="o2AddMenuToggle"' in response.text
-    assert 'id="menuVisibleChallenge"' in response.text
-    assert 'id="menuNewChallenge"' in response.text
-    assert 'id="profileDeviceName"' in response.text
-    assert '<button id="download" class="icon-button"' in response.text
-    assert 'id="resetZoom"' in response.text
-    assert 'id="resetZoomHeader"' in response.text
-    assert "Reset view" in response.text
-    assert "chartjs-plugin-zoom" in response.text
-    assert "mobile-web-app-capable" in response.text
-    assert 'rel="manifest" href="/manifest.webmanifest"' in response.text
-    assert 'rel="icon" href="/favicon.ico" sizes="any"' in response.text
-    assert 'rel="icon" type="image/svg+xml" href="/logo.svg"' in response.text
-    assert 'rel="icon" type="image/png" sizes="32x32" href="/icon-32.png"' in response.text
-    assert 'rel="apple-touch-icon" sizes="180x180" href="/icon-180.png"' in response.text
-    assert "serviceWorker" in response.text
-    assert "offlineBands" in response.text
-    assert "themeToken('--chart-offline-fill', 'transparent')" in response.text
-    assert "Device offline / sock off" in response.text
-    assert "row?.sock_disconnected" in response.text
-    assert "row?.sock_off" in response.text
-    assert "notificationGlyphs" in response.text
-    assert "oxygenCriticalThreshold" in response.text
-    assert "${critical}% O₂" in response.text
-    assert "notificationHoverPriority" in response.text
-    assert "attachNotificationHover" in response.text
-    assert "function tooltipTitle(items)" in response.text
-    assert "title: tooltipTitle" in response.text
-    assert "label: tooltipLabel" in response.text
-    assert "chartValue(context.parsed.y, '%')" in response.text
-    assert "callback: axisTick" in response.text
-    assert "notificationHit" in response.text
-    assert "hitRadius: 24" in response.text
-    assert "/api/notifications" in response.text
-    assert "Notifications" in response.text
-    assert 'id="dailyInsightsToggle"' in response.text
-    assert 'id="dailyInsightsModal"' in response.text
-    assert 'id="dailyInsightsChart"' in response.text
-    assert "dailyInsightsChart = new Chart" in response.text
-    assert "dailyOxygenAvg" in response.text
-    assert "dailyOxygenSleep" in response.text
-    assert "dailyOxygenWake" in response.text
-    assert "dailyHeartRateAvg" in response.text
-    assert "dailySkinTempAvg" in response.text
-    assert "Skin temp °C" in response.text
-    assert "Temp avg" in response.text
-    assert "Avg skin temp" in response.text
-    assert "renderDailyInsightsChart(periods)" in response.text
-    assert "Daily insights" in response.text
-    assert "Calendar days. Today is in progress" in response.text
-    assert "dailyInsightPeriods" in response.text
-    assert "sleepBucket(row) === 'sleeping'" in response.text
-    assert "sleepBucket(row) === 'waking'" in response.text
-    assert "O₂ sleep" in response.text
-    assert "HR wake" in response.text
-    assert "offline/sock-off and O₂ challenge samples excluded" in response.text
-    assert "/api/crypto" not in response.text
-    assert "cryptoCard" not in response.text
-    assert "btcPrice" not in response.text
-    assert "O₂ trend companion" in response.text
-    assert "How to read the O₂ trend companion" in response.text
-    assert "MACD-style oxygen view" in response.text
-    assert "oxygen challenges stay visible as real readings" in response.text
-    assert "Offline gaps and oxygen challenges are not bridged" not in response.text
-    assert "O₂ avg (%)" in response.text
-    assert "30m − 4h signal" in response.text
-    assert "Blue line:" not in response.text
-    assert "trendLineLabel" not in response.text
-    assert "Raw points O₂ avg" not in response.text
-    assert "Trend signal" in response.text
-    assert "legend: { display: false }" in response.text
-    assert "TREND_MAX_SAMPLE_GAP_MS" in response.text
-    assert "TREND_MAX_SOURCE_POINTS_DESKTOP = 800" in response.text
-    assert "TREND_MAX_SOURCE_POINTS_MOBILE = 420" in response.text
-    assert "trendSourceRows" in response.text
-    assert "rollingOxygenAverage(shortMinutes, trendRows)" in response.text
-    assert "rollingOxygenAverage(longMinutes, trendRows)" in response.text
-    assert "y: null" in response.text
-    assert "spanGaps: false" in response.text
-    assert "Trend gap — offline or missing data." in response.text
-    assert "Trend gap — offline, missing data, or O₂ challenge." not in response.text
-    assert "function rollingOxygenAverage(minutes, rows = readings)" in response.text
-    assert "const offline = isOffline(row) || !Number.isFinite(value)" in response.text
-    assert "addGapMarker(time, inChallenge ? 'challenge' : 'offline')" not in response.text
-    assert "const inChallenge = timeInIntervals(time, challengeWindows)" not in response.text
-    assert "companion-info" in response.text
-    assert "companion-header" not in response.text
-    assert "requestIdleCallback" in response.text
-    assert "hydrateSecondaryData" in response.text
-    assert "renderCharts({ deferTrend: true })" in response.text
-    assert "historyHoursForSelection" in response.text
-    assert "Math.ceil(hours) + HISTORY_PAN_BUFFER_HOURS" in response.text
-    assert "defaultVisibleRange" in response.text
-    assert "extendPointsToVisibleEdges" in response.text
-    assert "readingLineDataset('heartRate', 'Heart rate', 'heart_rate'" in response.text
-    assert 'id="chartLayout"' in response.text
-    assert "gapIntervals" in response.text
-    assert "noDataBands" in response.text
-    assert "rollingAverageForKey" in response.text
-    assert "const value = metricValue(row, key)" in response.text
-    assert "if (isOffline(row) || value === null)" in response.text
-    assert "key === 'skin_temperature' ? null : 0" in response.text
-    assert "reason: key === 'skin_temperature' ? 'missing' : 'offline-zero'" in response.text
-    assert "offset: false" in response.text
-    assert "hr: { type: 'linear', position: 'left', min: 0" in response.text
-    assert "spo2: { type: 'linear', position: 'right', min: 0" in response.text
-    assert "'skinTemperature', 'Skin temp °C', 'skin_temperature'" in response.text
-    assert "metric-grid" not in response.text
-    assert "renderMetricCards" not in response.text
-    assert 'id="metricCards"' not in response.text
-    assert "dataQs" in response.text
-    assert response.text.count("fetchJson(`${API_BASE}/api/readings?${dataQs}`)") == 1
-    assert "refreshInFlight" in response.text
-    assert "if (refreshInFlight && !force) return refreshInFlight" in response.text
-    assert "attachReadingsTableSelection" in response.text
-    assert "selectionAttached" in response.text
-    assert "filtered.map((row, index)" not in response.text
-    assert "TABLE_ROW_LIMIT = 500" in response.text
-    assert "newest ${tableRows.length} of ${filtered.length} loaded" in response.text
-    assert "tableRows.map((row, index)" in response.text
-    assert "HISTORY_PAN_BUFFER_HOURS = 2" in response.text
-    assert "OLDER_HISTORY_CHUNK_HOURS = 24" in response.text
-    assert "function chartPoints(points)" in response.text
-    assert "downsamplePoints" not in response.text
-    assert "CHART_MAX_POINTS" not in response.text
-    assert "bucket.forEach(item" not in response.text
-    assert "offlineTransition" in response.text
-    assert "table.addEventListener('click'" in response.text
-    assert "loadOlderHistoryIfNeeded" in response.text
-    assert "release near the left edge to load more" in response.text
-    assert "oxygenTrendSignal(shortAvg, longAvg)" in response.text
-    assert "sleepPhaseHover" in response.text
-    assert "sleepBands" in response.text
-    assert "stateChartHover" in response.text
-    assert "stateTooltip" in response.text
-    assert "dayBoundaries" in response.text
-    assert "dayBoundaryTimes" in response.text
-    assert "state-day-boundary" in response.text
-    assert "timeTickValues(range)" in response.text
-    assert "sleepStageInfo" in response.text
-    assert "sleepHighlightToggle" in response.text
-    assert "sleepBallparkToggle" in response.text
-    assert "challengeBandsToggle" in response.text
-    assert "Guess sleep windows" in response.text
-    assert "smoothBallparkIntervals" in response.text
-    assert "function rollupBucket()" in response.text
-    assert "return '30m';" in response.text
-    assert "movementSeconds" in response.text
-    assert "awakeLikeSeconds" in response.text
-    assert "subtractIntervals" in response.text
-    assert "setStateStripHoverFromEvent" in response.text
-    assert "attachStateChartHover" in response.text
-    assert "id=\"timePan\"" in response.text
-    assert "panToSliderValue" in response.text
-    assert response.text.index("chart-toolbar") < response.text.index("id=\"vitalsChart\"")
-    assert response.text.index("challengeBandsToggle") < response.text.index("id=\"vitalsChart\"")
-    assert response.text.index("id=\"vitalsChart\"") < response.text.index("id=\"stateStrip\"") < response.text.index("id=\"oxygenTrendChart\"")
-    assert "wheel:" in response.text
-    assert "pinch:" in response.text
-    assert "selector.value = '6'" not in response.text
-    assert "drag: { enabled: !mobile" in response.text
-    assert "pan: { enabled: true" in response.text
-    assert "onPanComplete: ({ chart }) => { syncZoomFrom(chart); loadOlderHistoryIfNeeded().catch(console.error); }" in response.text
-    assert "touch-action: pan-y" in response.text
-    assert "attachMobileDragPan" in response.text
-    assert "panVisibleWindowByPixels" in response.text
-    assert "pointerType === 'touch'" in response.text
-    assert "visibleWindowSnapshot" in response.text
-    assert "refreshedVisibleRange" in response.text
-    assert "sliderAtEnd" in response.text
-    assert "onPanComplete" in response.text
-    assert "O₂ challenges" in response.text
-    assert "O₂ challenge" in response.text
-    assert "O₂ challenges / add" not in response.text
-    assert "O₂+" in response.text
-    assert "Use current graph window" in response.text
-    assert "Enter new times…" in response.text
-    assert "Add new O₂ challenge" in response.text
-    assert "Add one from this popup" in response.text
-    assert "data-add-challenge-empty" in response.text
-    assert "data-visible-challenge-empty" in response.text
-    assert "Use visible chart window" in response.text
-    assert "/api/oxygen-challenges" in response.text
-    assert "challengeBands" in response.text
-    assert "beforeDraw(chart, _args, options)" in response.text
-    assert "const isTrendCompanion = chart.canvas.id === 'oxygenTrendChart'" in response.text
-    assert "themeToken('--chart-challenge-fill-trend', 'transparent')" in response.text
-    assert "ctx.setLineDash(isTrendCompanion ? [7, 5] : [8, 5])" in response.text
-    assert "ctx.strokeRect(left, chartArea.top + 1" in response.text
-    assert "seriesAlpha(SERIES.good, 'f2')" in response.text
-    assert "seriesAlpha(SERIES.bad, 'f2')" in response.text
-    assert "stateStrip" in response.text
-    assert "Challenge data is excluded" in response.text
-    assert "challengeEditForm" in response.text
-    assert "Save edits" in response.text
-    assert "Delete challenge" in response.text
-    assert "closeNotificationsPanel" not in response.text  # bell moved to the shell
-    assert 'id="notificationsToggle"' not in response.text
-    assert 'id="shellBell"' in response.text
-    assert "closeChallengesPanel" in response.text
-    assert "safeRefresh" in response.text
-    assert 'id="refresh"' not in response.text  # refresh lives on the shell's living dot
-    assert 'id="shellDot"' in response.text
-    assert 'class="shell-tabs"' in response.text  # unified top bar
-    assert "initialLoading" in response.text
-    assert "Loading Owlet data" in response.text
-    assert "setInitialLoading('Loading readings and notifications" in response.text
-    assert "hideInitialLoading" in response.text
-    assert "titleStatusDot" in response.text
-    assert "device-label" in response.text
-    assert "mobile-label" in response.text
-    assert "O₂ Ch." in response.text
-    assert "compactDeviceName" in response.text
-    assert "Sock ${digits}" in response.text
-    assert "Auto-refresh in ${secondsUntilRefresh}s" in response.text
-    assert "updateTitleDotProgress" in response.text
-    assert "lastDataAt" in response.text
-    assert "barThickness: isMobileViewport() ? 3 : 4" in response.text
-    assert "minBarLength: 2" in response.text
-    assert '<span class="control-section-title">View</span>' not in response.text
-    assert "refreshNote" not in response.text
-    assert "batteryStatus" not in response.text  # battery lives in the shell top bar now
-    assert 'id="shellBattery"' in response.text
-    assert "latestBattery" not in response.text
-    assert "lowOxygen" not in response.text
-    assert "oxygen-value.good" in response.text
-    assert "function oxygenValueClass" in response.text
-    assert "if (value >= o2.warn) return 'good'" in response.text   # tiers come from settings
-    assert "if (value >= o2.critical) return 'caution'" in response.text
-    assert "return 'danger'" in response.text
-    assert "const visibility = new Map" in response.text
-    assert "readings-grid" in response.text
-    assert "reading-detail-panel" in response.text
-    assert "click any row on the left" in response.text
-    assert "selected-row" in response.text
-    assert "O₂ now + today" in response.text
-    assert "Crypto" not in response.text
-    assert 'id="installApp"' in response.text
-    assert response.text.index("aria-label=\"At a glance\"") < response.text.index("id=\"vitalsChart\"")
-    assert 'id="rollupChart"' not in response.text
-    assert 'id="stateChart"' not in response.text
-    assert response.text.index("Readings table") < response.text.index("Selected reading")
-    assert "O₂ now + today" in response.text
-    assert "Heart rate" in response.text
-    assert response.text.index('id="latestOxygen"') < response.text.index('id="sleepTotal"')
-    assert "sleepTotal" in response.text
-    assert "state-legend" not in response.text
+    assert "Owlet Dashboard" in data_page
+    assert "/api/readings" in data_page
+    assert "All stored data" in data_page
+    assert '<option selected value="24">24 hours</option>' in data_page
+    assert '<option value="72">3 days</option>' in data_page
+    assert '<option value="168">7 days</option>' in data_page
+    assert '<option value="all">All stored data</option>' in data_page
+    assert 'id="profileMenuToggle"' in data_page
+    assert 'id="profileAvatar"' in data_page
+    assert 'id="profileMenu"' in data_page
+    assert 'id="showCryptoSetting"' not in data_page
+    assert "Crypto widget" not in data_page
+    assert 'id="profileCurrentName"' not in data_page
+    assert "Current profile" not in data_page
+    assert "Switch profile" not in data_page
+    assert "Display preferences" not in data_page
+    assert 'id="deviceSelect"' in data_page
+    assert 'id="accountSelect"' in data_page
+    assert 'id="addAccount"' in data_page
+    assert "Link another Owlet account" in data_page
+    assert "renderProfileMenu" in data_page
+    assert "showCryptoEnabled" not in data_page
+    assert "updateCurrentAccountPreference" in data_page
+    assert "show_crypto" not in data_page
+    assert "el('profileMenuWrap')?.classList.toggle('share-only-hidden', SHARE_MODE);" in data_page
+    assert "cluster.classList.toggle('hidden', SHARE_MODE);" in data_page
+    assert "/api/accounts" in data_page
+    assert "has_refresh_token" not in data_page
+    assert "/api/devices" in data_page
+    assert 'id="smoothing"' in data_page
+    assert '<option selected value="raw">Raw points</option>' in data_page
+    assert '<option value="5">5 min avg</option>' in data_page
+    assert 'id="o2AddMenuToggle"' in data_page
+    assert 'id="menuVisibleChallenge"' in data_page
+    assert 'id="menuNewChallenge"' in data_page
+    assert 'id="profileDeviceName"' in data_page
+    assert '<button id="download" class="icon-button"' in data_page
+    assert 'id="resetZoom"' in data_page
+    assert 'id="resetZoomHeader"' in data_page
+    assert "Reset view" in data_page
+    assert "chartjs-plugin-zoom" in data_page
+    assert "mobile-web-app-capable" in data_page
+    assert 'rel="manifest" href="/manifest.webmanifest"' in data_page
+    assert 'rel="icon" href="/favicon.ico" sizes="any"' in data_page
+    assert 'rel="icon" type="image/svg+xml" href="/logo.svg"' in data_page
+    assert 'rel="icon" type="image/png" sizes="32x32" href="/icon-32.png"' in data_page
+    assert 'rel="apple-touch-icon" sizes="180x180" href="/icon-180.png"' in data_page
+    assert "serviceWorker" in data_page
+    assert "offlineBands" in data_page
+    assert "themeToken('--chart-offline-fill', 'transparent')" in data_page
+    assert "Device offline / sock off" in data_page
+    assert "row?.sock_disconnected" in data_page
+    assert "row?.sock_off" in data_page
+    assert "notificationGlyphs" in data_page
+    assert "oxygenCriticalThreshold" in data_page
+    assert "${critical}% O₂" in data_page
+    assert "notificationHoverPriority" in data_page
+    assert "attachNotificationHover" in data_page
+    assert "function tooltipTitle(items)" in data_page
+    assert "title: tooltipTitle" in data_page
+    assert "label: tooltipLabel" in data_page
+    assert "chartValue(context.parsed.y, '%')" in data_page
+    assert "callback: axisTick" in data_page
+    assert "notificationHit" in data_page
+    assert "hitRadius: 24" in data_page
+    assert "/api/notifications" in data_page
+    assert "Notifications" in data_page
+    assert 'id="dailyInsightsToggle"' in data_page
+    assert 'id="dailyInsightsModal"' in data_page
+    assert 'id="dailyInsightsChart"' in data_page
+    assert "dailyInsightsChart = new Chart" in data_page
+    assert "dailyOxygenAvg" in data_page
+    assert "dailyOxygenSleep" in data_page
+    assert "dailyOxygenWake" in data_page
+    assert "dailyHeartRateAvg" in data_page
+    assert "dailySkinTempAvg" in data_page
+    assert "Skin temp °C" in data_page
+    assert "Temp avg" in data_page
+    assert "Avg skin temp" in data_page
+    assert "renderDailyInsightsChart(periods)" in data_page
+    assert "Daily insights" in data_page
+    assert "Calendar days. Today is in progress" in data_page
+    assert "dailyInsightPeriods" in data_page
+    assert "sleepBucket(row) === 'sleeping'" in data_page
+    assert "sleepBucket(row) === 'waking'" in data_page
+    assert "O₂ sleep" in data_page
+    assert "HR wake" in data_page
+    assert "offline/sock-off and O₂ challenge samples excluded" in data_page
+    assert "/api/crypto" not in data_page
+    assert "cryptoCard" not in data_page
+    assert "btcPrice" not in data_page
+    assert "O₂ trend companion" in data_page
+    assert "How to read the O₂ trend companion" in data_page
+    assert "MACD-style oxygen view" in data_page
+    assert "oxygen challenges stay visible as real readings" in data_page
+    assert "Offline gaps and oxygen challenges are not bridged" not in data_page
+    assert "O₂ avg (%)" in data_page
+    assert "30m − 4h signal" in data_page
+    assert "Blue line:" not in data_page
+    assert "trendLineLabel" not in data_page
+    assert "Raw points O₂ avg" not in data_page
+    assert "Trend signal" in data_page
+    assert "legend: { display: false }" in data_page
+    assert "TREND_MAX_SAMPLE_GAP_MS" in data_page
+    assert "TREND_MAX_SOURCE_POINTS_DESKTOP = 800" in data_page
+    assert "TREND_MAX_SOURCE_POINTS_MOBILE = 420" in data_page
+    assert "trendSourceRows" in data_page
+    assert "rollingOxygenAverage(shortMinutes, trendRows)" in data_page
+    assert "rollingOxygenAverage(longMinutes, trendRows)" in data_page
+    assert "y: null" in data_page
+    assert "spanGaps: false" in data_page
+    assert "Trend gap — offline or missing data." in data_page
+    assert "Trend gap — offline, missing data, or O₂ challenge." not in data_page
+    assert "function rollingOxygenAverage(minutes, rows = readings)" in data_page
+    assert "const offline = isOffline(row) || !Number.isFinite(value)" in data_page
+    assert "addGapMarker(time, inChallenge ? 'challenge' : 'offline')" not in data_page
+    assert "const inChallenge = timeInIntervals(time, challengeWindows)" not in data_page
+    assert "companion-info" in data_page
+    assert "companion-header" not in data_page
+    assert "requestIdleCallback" in data_page
+    assert "hydrateSecondaryData" in data_page
+    assert "renderCharts({ deferTrend: true })" in data_page
+    assert "historyHoursForSelection" in data_page
+    assert "Math.ceil(hours) + HISTORY_PAN_BUFFER_HOURS" in data_page
+    assert "defaultVisibleRange" in data_page
+    assert "extendPointsToVisibleEdges" in data_page
+    assert "readingLineDataset('heartRate', 'Heart rate', 'heart_rate'" in data_page
+    assert 'id="chartLayout"' in data_page
+    assert "gapIntervals" in data_page
+    assert "noDataBands" in data_page
+    assert "rollingAverageForKey" in data_page
+    assert "const value = metricValue(row, key)" in data_page
+    assert "if (isOffline(row) || value === null)" in data_page
+    assert "key === 'skin_temperature' ? null : 0" in data_page
+    assert "reason: key === 'skin_temperature' ? 'missing' : 'offline-zero'" in data_page
+    assert "offset: false" in data_page
+    assert "hr: { type: 'linear', position: 'left', min: 0" in data_page
+    assert "spo2: { type: 'linear', position: 'right', min: 0" in data_page
+    assert "'skinTemperature', 'Skin temp °C', 'skin_temperature'" in data_page
+    assert "metric-grid" not in data_page
+    assert "renderMetricCards" not in data_page
+    assert 'id="metricCards"' not in data_page
+    assert "dataQs" in data_page
+    assert data_page.count("fetchJson(`${API_BASE}/api/readings?${dataQs}`)") == 1
+    assert "refreshInFlight" in data_page
+    assert "if (refreshInFlight && !force) return refreshInFlight" in data_page
+    assert "attachReadingsTableSelection" in data_page
+    assert "selectionAttached" in data_page
+    assert "filtered.map((row, index)" not in data_page
+    assert "TABLE_ROW_LIMIT = 500" in data_page
+    assert "newest ${tableRows.length} of ${filtered.length} loaded" in data_page
+    assert "tableRows.map((row, index)" in data_page
+    assert "HISTORY_PAN_BUFFER_HOURS = 2" in data_page
+    assert "OLDER_HISTORY_CHUNK_HOURS = 24" in data_page
+    assert "function chartPoints(points)" in data_page
+    assert "downsamplePoints" not in data_page
+    assert "CHART_MAX_POINTS" not in data_page
+    assert "bucket.forEach(item" not in data_page
+    assert "offlineTransition" in data_page
+    assert "table.addEventListener('click'" in data_page
+    assert "loadOlderHistoryIfNeeded" in data_page
+    assert "release near the left edge to load more" in data_page
+    assert "oxygenTrendSignal(shortAvg, longAvg)" in data_page
+    assert "sleepPhaseHover" in data_page
+    assert "sleepBands" in data_page
+    assert "stateChartHover" in data_page
+    assert "stateTooltip" in data_page
+    assert "dayBoundaries" in data_page
+    assert "dayBoundaryTimes" in data_page
+    assert "state-day-boundary" in data_page
+    assert "timeTickValues(range)" in data_page
+    assert "sleepStageInfo" in data_page
+    assert "sleepHighlightToggle" in data_page
+    assert "sleepBallparkToggle" in data_page
+    assert "challengeBandsToggle" in data_page
+    assert "Guess sleep windows" in data_page
+    assert "smoothBallparkIntervals" in data_page
+    assert "function rollupBucket()" in data_page
+    assert "return '30m';" in data_page
+    assert "movementSeconds" in data_page
+    assert "awakeLikeSeconds" in data_page
+    assert "subtractIntervals" in data_page
+    assert "setStateStripHoverFromEvent" in data_page
+    assert "attachStateChartHover" in data_page
+    assert "id=\"timePan\"" in data_page
+    assert "panToSliderValue" in data_page
+    assert data_page.index("chart-toolbar") < data_page.index("id=\"vitalsChart\"")
+    assert data_page.index("challengeBandsToggle") < data_page.index("id=\"vitalsChart\"")
+    assert data_page.index("id=\"vitalsChart\"") < data_page.index("id=\"stateStrip\"") < data_page.index("id=\"oxygenTrendChart\"")
+    assert "wheel:" in data_page
+    assert "pinch:" in data_page
+    assert "selector.value = '6'" not in data_page
+    assert "drag: { enabled: !mobile" in data_page
+    assert "pan: { enabled: true" in data_page
+    assert "onPanComplete: ({ chart }) => { syncZoomFrom(chart); loadOlderHistoryIfNeeded().catch(console.error); }" in data_page
+    assert "touch-action: pan-y" in data_page
+    assert "attachMobileDragPan" in data_page
+    assert "panVisibleWindowByPixels" in data_page
+    assert "pointerType === 'touch'" in data_page
+    assert "visibleWindowSnapshot" in data_page
+    assert "refreshedVisibleRange" in data_page
+    assert "sliderAtEnd" in data_page
+    assert "onPanComplete" in data_page
+    assert "O₂ challenges" in data_page
+    assert "O₂ challenge" in data_page
+    assert "O₂ challenges / add" not in data_page
+    assert "O₂+" in data_page
+    assert "Use current graph window" in data_page
+    assert "Enter new times…" in data_page
+    assert "Add new O₂ challenge" in data_page
+    assert "Add one from this popup" in data_page
+    assert "data-add-challenge-empty" in data_page
+    assert "data-visible-challenge-empty" in data_page
+    assert "Use visible chart window" in data_page
+    assert "/api/oxygen-challenges" in data_page
+    assert "challengeBands" in data_page
+    assert "beforeDraw(chart, _args, options)" in data_page
+    assert "const isTrendCompanion = chart.canvas.id === 'oxygenTrendChart'" in data_page
+    assert "themeToken('--chart-challenge-fill-trend', 'transparent')" in data_page
+    assert "ctx.setLineDash(isTrendCompanion ? [7, 5] : [8, 5])" in data_page
+    assert "ctx.strokeRect(left, chartArea.top + 1" in data_page
+    assert "seriesAlpha(SERIES.good, 'f2')" in data_page
+    assert "seriesAlpha(SERIES.bad, 'f2')" in data_page
+    assert "stateStrip" in data_page
+    assert "Challenge data is excluded" in data_page
+    assert "challengeEditForm" in data_page
+    assert "Save edits" in data_page
+    assert "Delete challenge" in data_page
+    assert "closeNotificationsPanel" not in data_page  # bell moved to the shell
+    assert 'id="notificationsToggle"' not in data_page
+    assert 'id="shellBell"' in data_page
+    assert "closeChallengesPanel" in data_page
+    assert "safeRefresh" in data_page
+    assert 'id="refresh"' not in data_page  # refresh lives on the shell's living dot
+    assert 'id="shellDot"' in data_page
+    assert 'class="shell-tabs"' in data_page  # unified top bar
+    assert "initialLoading" in data_page
+    assert "Loading Owlet data" in data_page
+    assert "setInitialLoading('Loading readings and notifications" in data_page
+    assert "hideInitialLoading" in data_page
+    assert "titleStatusDot" in data_page
+    assert "device-label" in data_page
+    assert "mobile-label" in data_page
+    assert "O₂ Ch." in data_page
+    assert "compactDeviceName" in data_page
+    assert "Sock ${digits}" in data_page
+    assert "Auto-refresh in ${secondsUntilRefresh}s" in data_page
+    assert "updateTitleDotProgress" in data_page
+    assert "lastDataAt" in data_page
+    assert "barThickness: isMobileViewport() ? 3 : 4" in data_page
+    assert "minBarLength: 2" in data_page
+    assert '<span class="control-section-title">View</span>' not in data_page
+    assert "refreshNote" not in data_page
+    assert "batteryStatus" not in data_page  # battery lives in the shell top bar now
+    assert 'id="shellBattery"' in data_page
+    assert "latestBattery" not in data_page
+    assert "lowOxygen" not in data_page
+    assert "oxygen-value.good" in data_page
+    assert "function oxygenValueClass" in data_page
+    assert "if (value >= o2.warn) return 'good'" in data_page   # tiers come from settings
+    assert "if (value >= o2.critical) return 'caution'" in data_page
+    assert "return 'danger'" in data_page
+    assert "const visibility = new Map" in data_page
+    assert "readings-grid" in data_page
+    assert "reading-detail-panel" in data_page
+    assert "click any row on the left" in data_page
+    assert "selected-row" in data_page
+    assert "O₂ now + today" in data_page
+    assert "Crypto" not in data_page
+    assert 'id="installApp"' in data_page
+    assert data_page.index("aria-label=\"At a glance\"") < data_page.index("id=\"vitalsChart\"")
+    assert 'id="rollupChart"' not in data_page
+    assert 'id="stateChart"' not in data_page
+    assert data_page.index("Readings table") < data_page.index("Selected reading")
+    assert "O₂ now + today" in data_page
+    assert "Heart rate" in data_page
+    assert data_page.index('id="latestOxygen"') < data_page.index('id="sleepTotal"')
+    assert "sleepTotal" in data_page
+    assert "state-legend" not in data_page
 
 
 @pytest.mark.asyncio
@@ -955,12 +957,14 @@ async def test_share_link_serves_read_only_dashboard_and_api_without_basic_auth(
         wrong = client.get("/share/wrong-token-with-enough-length")
     with client_for(app) as anonymous:
         normal_api = anonymous.get("/api/readings")
+        # No session: share viewers must be able to load the page's CSS/JS.
+        share_page = with_page_assets(anonymous, dashboard.text)
 
     assert dashboard.status_code == 200
     assert f'const API_BASE = "/share/{token}";' in dashboard.text
-    assert "Shared read-only view" in dashboard.text
-    assert 'rel="manifest"' not in dashboard.text
-    assert "serviceWorker.register" in dashboard.text
+    assert "Shared read-only view" in share_page
+    assert 'rel="manifest"' not in share_page
+    assert "serviceWorker.register" in share_page
     assert readings.status_code == 200
     assert readings.json()[0]["heart_rate"] == 120
     assert "raw" not in readings.json()[0]
