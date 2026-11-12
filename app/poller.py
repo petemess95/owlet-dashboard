@@ -13,7 +13,7 @@ from app.alerts import ALERTS, resolve_alert_timing
 from app.analytics import resolve_o2_thresholds
 from app.models import OwletReading
 from app.owlet_client import OwletClient
-from app.quality import is_offline_reading
+from app.quality import FrozenVitalsDetector, is_offline_reading
 from app.store import ReadingStore
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,7 @@ class Poller:
         self._last_alert_o2: float | None = None
         self._last_alert_at = float("-inf")   # monotonic clock starts near 0 on fresh boots
         self._last_readiness_key: str | None = None
+        self._frozen = FrozenVitalsDetector()
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -111,7 +112,7 @@ class Poller:
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
-                reading = await self.read_once()
+                reading = self._frozen.mark(await self.read_once())
                 await self.store.insert_reading(reading, account_id=self.account_id)
                 await self._feed_alerts(reading)
                 await self._check_custom_alert(reading)

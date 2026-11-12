@@ -729,7 +729,8 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
           ? 'charging'
           : run.battery0 != null && run.battery1 != null && run.battery1 - run.battery0 > 1
             ? 'charging'
-            : (run.disconnected ? 'disconnected' : 'sock off');
+            : run.disconnected ? 'disconnected'
+              : run.baseOff ? 'base off' : 'sock off';
         return run;
       };
       for (let i = 0; i < rows.length; i++) {
@@ -747,6 +748,8 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
           }
           if (rows[i].sock_disconnected) sockRun.disconnected = true;
           if (rows[i].charging) sockRun.charging = true;
+          // The base is off and the sock's numbers froze (server-detected).
+          sockRun.baseOff = !!rows[i].vitals_frozen;
         } else if (sockRun) { out.push(finishSockRun(sockRun)); sockRun = null; }
       }
       if (sockRun) { sockRun.end = Date.now(); out.push(finishSockRun(sockRun)); }
@@ -2325,9 +2328,11 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       } else if (offline) {
         headline = sockLabel === 'charging' ? `${name}'s sock is charging.`
           : sockLabel === 'disconnected' ? `${name}'s sock has lost its signal.`
+          : sockLabel === 'base off' ? `${name}'s base station is off.`
           : `${name}'s sock isn't reporting.`;
         detail = sockLabel === 'charging' ? 'No readings arrive while it charges.'
           : sockLabel === 'disconnected' ? 'The sock is not connected, so no readings are arriving.'
+          : sockLabel === 'base off' ? 'Owlet is not monitoring. The sock is repeating its last numbers, so they are hidden.'
           : 'It may be off, or not on properly.';
       } else {
         const sessionText = liveRun
@@ -2364,6 +2369,7 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
         noteTone = 'warn';
       } else if (offline) {
         if (sockLabel === 'charging') note = 'Sock charging · not monitoring';
+        else if (sockLabel === 'base off') { note = ICON_WARN + 'Base station off · not monitoring'; noteTone = 'warn'; }
         else {
           note = ICON_WARN + (sockLabel === 'disconnected' ? 'Sock signal lost · no readings' : 'Sock off · no readings');
           noteTone = 'warn';
@@ -2394,7 +2400,7 @@ NOW_SCRIPTS = """<script src="/insights.js"></script>
       else if (stale) { sockSub = ICON_CLOCK + `No new data for ${fmtDur(latest.ageMs / 1000)}`; sockTone = 'warn'; }
       else if (offline) {
         if (sockLabel === 'charging') sockSub = 'Charging · not monitoring';
-        else { sockSub = ICON_WARN + (sockLabel === 'disconnected' ? 'Signal lost' : 'Sock off'); sockTone = 'warn'; }
+        else { sockSub = ICON_WARN + (sockLabel === 'disconnected' ? 'Signal lost' : sockLabel === 'base off' ? 'Base off · not monitoring' : 'Sock off'); sockTone = 'warn'; }
       } else sockSub = 'Receiving readings';
       setHtml(el('sockSub'), sockSub);
       el('sockSub').className = 'note' + (sockTone ? ' ' + sockTone : '');

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,9 @@ import aiosqlite
 from app.models import OwletReading, raw_alert_mask_has, raw_flag_active
 from app.notifications import NotificationEvent, extract_notifications
 from app.oxygen_challenges import challenge_analysis, parse_time, reading_in_any_period
-from app.quality import is_offline_reading
+from app.quality import FrozenVitalsDetector, is_offline_reading
+
+logger = logging.getLogger(__name__)
 
 
 # Per-reading raw storage keeps only what changes and what downstream code
@@ -36,6 +39,7 @@ _SLIM_RAW_KEYS = (
     "alert_paused_status",
     "readings_flag",
     "monitoring_start_time",
+    "vitals_frozen",   # set by the poller, not Owlet (see quality.FrozenVitalsDetector)
 )
 
 # Properties whose values change reading-to-reading; everything else in the
@@ -230,6 +234,7 @@ class ReadingStore:
             )
             await self._ensure_account_schema(db)
             await self._ensure_notification_backfill(db)
+            await self._ensure_frozen_vitals_backfill(db)
             await db.commit()
         self._schema_ready = True
 
@@ -1018,7 +1023,8 @@ class ReadingStore:
                        json_extract(raw_json, '$.sock_off'),
                        json_extract(raw_json, '$.SOCK_OFF.value'),
                        json_extract(raw_json, '$.alerts_mask'),
-                       battery_minutes, movement_bucket, oxygen_10_av, signal_strength, charging
+                       battery_minutes, movement_bucket, oxygen_10_av, signal_strength, charging,
+                       json_extract(raw_json, '$.vitals_frozen')
                 FROM readings
                 {where}
                 ORDER BY recorded_at DESC
@@ -1587,6 +1593,57 @@ class ReadingStore:
             "INSERT OR REPLACE INTO metadata (key, value) VALUES ('notifications_schema_version', '5')"
         )
 
+    async def _ensure_frozen_vitals_backfill(self, db: aiosqlite.Connection) -> None:
+        """One-time: mark rows stored before the poller learned to flag frozen
+        HR/SpO2 (base station off), so stats and baselines stop counting them."""
+        cursor = await db.execute("SELECT value FROM metadata WHERE key = 'frozen_vitals_backfill'")
+        row = await cursor.fetchone()
+        if row and row[0] == "1":
+            return
+        await self.backfill_frozen_vitals(db)
+        await db.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('frozen_vitals_backfill', '1')"
+        )
+
+    async def backfill_frozen_vitals(self, db: aiosqlite.Connection) -> int:
+        """Replay FrozenVitalsDetector over stored rows in time order, per
+        device, and set raw_json.vitals_frozen on the ones it flags."""
+        cursor = await db.execute(
+            """
+            SELECT id, account_id, device_serial, recorded_at, heart_rate, oxygen_saturation, raw_json
+            FROM readings
+            ORDER BY account_id ASC, device_serial ASC, recorded_at ASC
+            """
+        )
+        frozen_ids: list[int] = []
+        detector, current = FrozenVitalsDetector(), None
+        async for row_id, account_id, serial, recorded_at, hr, spo2, raw_json in cursor:
+            if (account_id, serial) != current:
+                detector, current = FrozenVitalsDetector(), (account_id, serial)
+            try:
+                raw = json.loads(raw_json) if raw_json else {}
+                at = datetime.fromisoformat(str(recorded_at))
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(raw, dict) or at.tzinfo is None:
+                continue
+            reading = OwletReading.model_construct(
+                device_serial=serial, recorded_at=at, heart_rate=hr,
+                oxygen_saturation=spo2, vitals_frozen=False, raw=raw,
+            )
+            if detector.mark(reading).vitals_frozen and raw_json and '"vitals_frozen"' not in raw_json:
+                frozen_ids.append(int(row_id))
+        for start in range(0, len(frozen_ids), 500):
+            chunk = frozen_ids[start:start + 500]
+            await db.execute(
+                f"UPDATE readings SET raw_json = json_set(raw_json, '$.vitals_frozen', json('true')) "
+                f"WHERE id IN ({','.join('?' * len(chunk))})",
+                chunk,
+            )
+        if frozen_ids:
+            logger.info("Marked %d stored readings as frozen vitals (base station off)", len(frozen_ids))
+        return len(frozen_ids)
+
     async def _backfill_notifications(self, db: aiosqlite.Connection) -> None:
         cursor = await db.execute(
             """
@@ -1725,6 +1782,7 @@ class ReadingStore:
             sleep_state=row[6],
             sock_disconnected=raw_flag_active(raw, "sock_disconnected", "SOCK_DISCON_ALRT") or raw_alert_mask_has(raw, 16),
             sock_off=raw_flag_active(raw, "sock_off", "SOCK_OFF") or raw_alert_mask_has(raw, 64),
+            vitals_frozen=raw_flag_active(raw, "vitals_frozen"),
             skin_temperature=row[7],
             raw=raw,
         )
@@ -1749,6 +1807,7 @@ class ReadingStore:
             oxygen_10_av=row[15],
             signal_strength=row[16],
             charging=bool(row[17]),
+            vitals_frozen=len(row) > 18 and _sqlite_bool(row[18]),
             raw={},
         )
 

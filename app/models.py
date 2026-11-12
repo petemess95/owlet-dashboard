@@ -24,6 +24,8 @@ class OwletReading(BaseModel):
     sleep_state: str | None = None
     sock_disconnected: bool = False
     sock_off: bool = False
+    # HR/SpO2 are a frozen copy of the last measurement (base off), not live.
+    vitals_frozen: bool = False
     skin_temperature: float | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
@@ -153,6 +155,7 @@ def normalize_reading(raw: dict[str, Any], device_serial: str) -> OwletReading:
         sleep_state=None if sleep_state is None else str(sleep_state),
         sock_disconnected=sock_disconnected,
         sock_off=sock_off,
+        vitals_frozen=raw_flag_active(raw, "vitals_frozen"),
         skin_temperature=_to_float(
             field("skin_temperature", "SKIN_TEMPERATURE", "st")
         ),

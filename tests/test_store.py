@@ -323,3 +323,99 @@ async def test_challenge_ownership_scoping(tmp_path):
         await store.get_oxygen_challenge(challenge["id"], account_ids=[999])
     assert await store.delete_oxygen_challenge(challenge["id"], account_ids=[999]) == 0
     assert await store.delete_oxygen_challenge(challenge["id"], account_ids=[acc["id"]]) == 1
+
+
+# --- frozen vitals while the base station is off ---------------------------
+
+def _base_off_reading(seconds: int, hr: float = 159, spo2: float = 96, base_on: int = 0, mv: int = 50):
+    """Shape of the real payload: fresh packets (movement changes) but HR/SpO2
+    pinned, no Owlet timestamp, base_station_on reported separately."""
+    from datetime import UTC, datetime, timedelta
+
+    raw = {
+        "base_station_on": base_on,
+        "sock_off": False,
+        "sock_disconnected": False,
+        "REAL_TIME_VITALS": {"value": f'{{"ox":{spo2},"hr":{hr},"mv":{mv},"bso":{base_on},"srf":3}}'},
+    }
+    reading = normalize_reading(raw, device_serial="AC123")
+    reading.recorded_at = datetime(2026, 11, 12, 13, 46, tzinfo=UTC) + timedelta(seconds=seconds)
+    return reading
+
+
+def test_frozen_vitals_with_base_off_are_flagged_offline():
+    from app.quality import FrozenVitalsDetector, is_offline_reading
+
+    detector = FrozenVitalsDetector()
+    marked = [detector.mark(_base_off_reading(s, mv=s % 97)) for s in range(0, 600, 10)]
+    # The first 90 s look like any other reading; after that they are frozen.
+    assert not any(r.vitals_frozen for r in marked[:9])
+    assert all(r.vitals_frozen and is_offline_reading(r) for r in marked[9:])
+    assert marked[-1].raw["vitals_frozen"] is True
+
+
+def test_changing_vitals_with_base_off_stay_live():
+    from app.quality import FrozenVitalsDetector
+
+    detector = FrozenVitalsDetector()
+    marked = [detector.mark(_base_off_reading(s, hr=150 + (s // 30) % 5)) for s in range(0, 600, 10)]
+    assert not any(r.vitals_frozen for r in marked)
+
+
+def test_steady_vitals_with_base_on_are_not_flagged():
+    from app.quality import FrozenVitalsDetector
+
+    detector = FrozenVitalsDetector()
+    marked = [detector.mark(_base_off_reading(s, base_on=1)) for s in range(0, 600, 10)]
+    assert not any(r.vitals_frozen for r in marked)
+
+
+@pytest.mark.asyncio
+async def test_frozen_flag_survives_storage(tmp_path):
+    from app.quality import FrozenVitalsDetector, is_offline_reading
+
+    store = ReadingStore(tmp_path / "owlet.sqlite3")
+    await store.init()
+    account = await store.create_account(email="frozen@example.test")
+    detector = FrozenVitalsDetector()
+    for s in range(0, 200, 10):
+        await store.insert_reading(detector.mark(_base_off_reading(s)), account_id=account["id"])
+
+    latest = await store.get_latest_device_reading(account_id=account["id"], device_serial="AC123")
+    assert latest is not None and latest.vitals_frozen and is_offline_reading(latest)
+    listed = await store.get_readings(hours=None, account_ids=[account["id"]])
+    assert listed[-1].vitals_frozen and not listed[0].vitals_frozen
+    analysis = await store.get_analysis_readings(hours=None, account_ids=[account["id"]])
+    assert analysis[-1].vitals_frozen and not analysis[0].vitals_frozen
+
+
+@pytest.mark.asyncio
+async def test_startup_backfills_frozen_vitals_once(tmp_path):
+    from app.quality import is_offline_reading
+
+    path = tmp_path / "owlet.sqlite3"
+    store = ReadingStore(path)
+    await store.init()
+    account = await store.create_account(email="old@example.test")
+    # Rows written before the detector existed: frozen but unflagged.
+    for s in range(0, 300, 10):
+        await store.insert_reading(_base_off_reading(s), account_id=account["id"])
+    # A real, changing base-off stretch on another device stays live.
+    for s in range(0, 300, 10):
+        r = _base_off_reading(s, hr=150 + (s // 30) % 5)
+        r.device_serial = "AC999"
+        await store.insert_reading(r, account_id=account["id"])
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM metadata WHERE key = 'frozen_vitals_backfill'")
+
+    reopened = ReadingStore(path)
+    await reopened.init()
+    rows = await reopened.get_readings(hours=None, account_ids=[account["id"]])
+    frozen = [r for r in rows if r.device_serial == "AC123"]
+    live = [r for r in rows if r.device_serial == "AC999"]
+    assert not any(r.vitals_frozen for r in frozen[:9])
+    assert all(r.vitals_frozen and is_offline_reading(r) for r in frozen[9:])
+    assert not any(r.vitals_frozen for r in live)
+    with sqlite3.connect(path) as db:
+        marker = db.execute("SELECT value FROM metadata WHERE key = 'frozen_vitals_backfill'").fetchone()
+    assert marker == ("1",)
