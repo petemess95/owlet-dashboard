@@ -29,14 +29,19 @@ pub(crate) struct MonitorInfo {
 /// The overlay windows for a `flash_target` setting ("secondary",
 /// "primary_border", "all" or a monitor id). Pure, so it is unit-tested and
 /// reusable (game mode asks for "all"). Never empty when `monitors` is not.
-/// The primary is the monitor at `primary_pos`; if none matches, every
-/// monitor counts as non-primary (v0.1 behaviour) and a border frame, when
-/// one is needed, goes on the first monitor.
+/// The primary is the monitor at `primary_pos`; if that is missing or matches
+/// no monitor, the monitor at (0, 0) (where Windows always puts the primary).
+/// If neither exists, every monitor counts as non-primary (v0.1 behaviour)
+/// and a border frame, when one is needed, goes on the first monitor.
 pub(crate) fn choose_targets(
     monitors: &[MonitorInfo],
     primary_pos: Option<PhysicalPosition<i32>>,
     flash_target: &str,
 ) -> Vec<Target> {
+    let origin = PhysicalPosition::new(0, 0);
+    let primary_pos = primary_pos
+        .filter(|p| monitors.iter().any(|m| m.pos == *p))
+        .or_else(|| monitors.iter().any(|m| m.pos == origin).then_some(origin));
     let is_primary = |m: &MonitorInfo| Some(m.pos) == primary_pos;
     let full = |m: &MonitorInfo| Target { pos: m.pos, size: m.size, border: false };
     let border = |m: &MonitorInfo| Target { pos: m.pos, size: m.size, border: true };
@@ -81,7 +86,38 @@ pub(crate) fn pick_targets(app: &AppHandle, flash_target: &str) -> Vec<Target> {
     if monitors.is_empty() {
         monitors.extend(primary.as_ref().map(|m| info(0, m)));
     }
-    choose_targets(&monitors, primary.map(|m| *m.position()), flash_target)
+    let primary_pos = primary.map(|m| *m.position());
+    let targets = choose_targets(&monitors, primary_pos, flash_target);
+    log_targets_on_change(&describe_targets(&monitors, primary_pos, &targets));
+    targets
+}
+
+/// One line describing a target choice, for the log.
+pub(crate) fn describe_targets(
+    monitors: &[MonitorInfo],
+    primary_pos: Option<PhysicalPosition<i32>>,
+    targets: &[Target],
+) -> String {
+    let primary = primary_pos.map_or("none".to_string(), |p| format!("{},{}", p.x, p.y));
+    let ms: Vec<String> = monitors
+        .iter()
+        .map(|m| format!("{}@{},{} {}x{}", m.name, m.pos.x, m.pos.y, m.size.width, m.size.height))
+        .collect();
+    let ts: Vec<String> = targets
+        .iter()
+        .map(|t| format!("{},{} {}", t.pos.x, t.pos.y, if t.border { "border" } else { "full" }))
+        .collect();
+    format!("overlay targets: primary={primary} monitors=[{}] -> [{}]", ms.join(", "), ts.join(", "))
+}
+
+/// pick_targets runs every poll; only log when the description changes.
+fn log_targets_on_change(line: &str) {
+    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last != line {
+        log_line(line);
+        *last = line.to_string();
+    }
 }
 
 /// Window label for the i-th overlay target: "overlay", "overlay-1", ...
@@ -293,6 +329,36 @@ mod tests {
             }
         }
         assert!(choose_targets(&[], None, "all").is_empty());
+    }
+
+    #[test]
+    fn missing_or_mismatched_primary_uses_the_origin_monitor() {
+        // DISPLAY2 primary at (0,0), DISPLAY1 to its right; enumeration order varies.
+        for ms in [[mon("D1", 2560, 0), mon("D2", 0, 0)], [mon("D2", 0, 0), mon("D1", 2560, 0)]] {
+            for p in [None, Some(PhysicalPosition::new(7, 7))] {
+                assert_eq!(summary(&choose_targets(&ms, p, "all")), vec![(0, true), (2560, false)], "{p:?}");
+                assert_eq!(summary(&choose_targets(&ms, p, "primary_border")), vec![(0, true)], "{p:?}");
+                assert_eq!(summary(&choose_targets(&ms, p, "secondary")), vec![(2560, false)], "{p:?}");
+                assert_eq!(summary(&choose_targets(&ms, p, "D2")), vec![(0, true)], "{p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_origin_monitor_keeps_the_old_fallback() {
+        let ms = [mon("A", 100, 0), mon("B", 2020, 0)];
+        assert_eq!(summary(&choose_targets(&ms, None, "all")), vec![(100, false), (2020, false)]);
+        assert_eq!(summary(&choose_targets(&ms, None, "primary_border")), vec![(100, true)]);
+    }
+
+    #[test]
+    fn target_description() {
+        let ms = [mon("D2", 0, 0), mon("D1", 1920, 0)];
+        let ts = choose_targets(&ms, None, "all");
+        assert_eq!(
+            describe_targets(&ms, None, &ts),
+            "overlay targets: primary=none monitors=[D2@0,0 1920x1080, D1@1920,0 1920x1080] -> [0,0 border, 1920,0 full]"
+        );
     }
 
     #[test]

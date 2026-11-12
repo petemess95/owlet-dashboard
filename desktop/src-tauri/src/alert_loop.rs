@@ -104,7 +104,13 @@ pub(crate) fn alert_loop(app: AppHandle) {
         // Also after the alert: fullscreen detection (read by the next poll)
         // and the awake chime, which never plays during an alarm.
         let after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            app.state::<Shell>().game_detected.store(crate::gamemode::detect_fullscreen(), Ordering::SeqCst);
+            let detected = &app.state::<Shell>().game_detected;
+            let next = crate::gamemode::next_detection(
+                detected.load(Ordering::SeqCst),
+                crate::gamemode::foreground_is_ours(),
+                crate::gamemode::detect_fullscreen,
+            );
+            detected.store(next, Ordering::SeqCst);
             if let Some((id, level)) = &chime_poll {
                 let quiet = level == "none" && !crate::audio::alarm_active();
                 match chime.on_poll(*id, quiet) {

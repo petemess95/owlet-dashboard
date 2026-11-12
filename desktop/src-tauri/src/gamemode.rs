@@ -72,6 +72,37 @@ pub(crate) fn is_fullscreen_state(state: i32) -> bool {
     matches!(state, 2 | 3)
 }
 
+/// The next `game_detected` value. While our own window (the overlay, which
+/// covers a monitor and is always on top) is foreground, Windows reports
+/// QUNS_BUSY because of us, so no new reading is taken and the previous value
+/// stands: a game already detected keeps every monitor flashing.
+pub(crate) fn next_detection(previous: bool, foreground_is_ours: bool, quns_fullscreen: impl FnOnce() -> bool) -> bool {
+    if foreground_is_ours {
+        previous
+    } else {
+        quns_fullscreen()
+    }
+}
+
+/// Whether the foreground window belongs to this process. Any failure counts
+/// as "not ours" (the reading is then taken as usual).
+#[cfg(windows)]
+pub(crate) fn foreground_is_ours() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return false;
+    }
+    let mut pid: u32 = 0;
+    let tid = unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    tid != 0 && pid != 0 && pid == std::process::id()
+}
+
+#[cfg(not(windows))]
+pub(crate) fn foreground_is_ours() -> bool {
+    false
+}
+
 /// One cheap query; any error counts as "no game".
 #[cfg(windows)]
 pub(crate) fn detect_fullscreen() -> bool {
@@ -213,6 +244,16 @@ mod tests {
         // QUNS: 1 not present, 2 busy, 3 d3d fullscreen, 4 presentation, 5 accepts, 6 quiet, 7 app
         for (s, want) in [(1, false), (2, true), (3, true), (4, false), (5, false), (6, false), (7, false)] {
             assert_eq!(is_fullscreen_state(s), want, "state {s}");
+        }
+    }
+
+    #[test]
+    fn own_foreground_keeps_the_previous_detection() {
+        for prev in [false, true] {
+            for quns in [false, true] {
+                assert_eq!(next_detection(prev, true, || quns), prev, "ours prev={prev} quns={quns}");
+                assert_eq!(next_detection(prev, false, || quns), quns, "other prev={prev} quns={quns}");
+            }
         }
     }
 
