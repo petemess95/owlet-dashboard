@@ -205,7 +205,8 @@
   // release does nothing (the alert keeps flashing). While the button is not
   // yet live, or for other mouse buttons, the press falls through to snooze.
   btn.addEventListener("mousedown", function (e) {
-    if (!alerting() || e.button !== 0 || Date.now() < armUntil) return;
+    if (!alerting() || state.mode === "border" || state.can_acknowledge !== true ||
+        e.button !== 0 || Date.now() < armUntil) return;
     e.stopPropagation();
     pressed = true;
   });

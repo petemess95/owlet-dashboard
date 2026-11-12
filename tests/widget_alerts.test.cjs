@@ -212,22 +212,103 @@ test('widget disconnection warning respects the last snooze until it expires', a
   assert.equal(p.element('frame').className, 'alert-amber');
 });
 
+// ---- overlay (overlay.html) -------------------------------------------------
+// Its own fake DOM: elements take listeners, and a mouse event runs the way a
+// browser runs it here: document capture listeners, then the target's own,
+// then document bubble listeners unless the target stopped propagation.
+const OVERLAY = 'desktop/src-tauri/ui-placeholder/overlay.html';
+function overlayPage({ initial = { level: 'none' } } = {}) {
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id)) {
+      let text = '';
+      elements.set(id, {
+        className: '', hidden: false, attrs: {}, listeners: {},
+        get textContent() { return text; },
+        set textContent(v) { text = String(v); },
+        style: { setProperty() {} },
+        toggleAttribute(name, force) { this.attrs[name] = !!force; return !!force; },
+        addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); },
+      });
+    }
+    return elements.get(id);
+  };
+  const intervals = new Map();
+  const calls = [];
+  const doc = { capture: {}, bubble: {} };
+  let overlayListener;
+  let now = 1800000000000;
+  const tauri = {
+    core: { invoke: async (command, args) => {
+      calls.push(args === undefined ? command : `${command} ${JSON.stringify(args)}`);
+      if (command === 'overlay_state') return initial;
+    } },
+    event: { listen: (_name, listener) => { overlayListener = listener; } },
+  };
+  vm.runInNewContext(script(OVERLAY), {
+    window: { __TAURI__: tauri },
+    document: {
+      getElementById: element,
+      addEventListener: (name, fn, capture) => { ((capture ? doc.capture : doc.bubble)[name] ||= []).push(fn); },
+    },
+    Date: { now: () => now },
+    setInterval: (fn, ms) => intervals.set(ms, fn),
+    setTimeout: () => 0,  // the arming repaint; the 500 ms paint covers it here
+  });
+  // targetId null = somewhere on the overlay that is not the button.
+  const dispatch = (type, targetId, button = 0) => {
+    const ev = { type, button, stopped: false, stopPropagation() { this.stopped = true; } };
+    for (const fn of doc.capture[type] || []) fn(ev);
+    if (targetId) for (const fn of element(targetId).listeners[type] || []) fn(ev);
+    if (!ev.stopped) for (const fn of doc.bubble[type] || []) fn(ev);
+  };
+  return {
+    element, intervals,
+    push: (value) => overlayListener({ payload: value }),
+    advance: (ms) => { now += ms; },
+    // A whole click: press and release on the same target.
+    click: (targetId, button = 0) => { dispatch('mousedown', targetId, button); if (button === 0) dispatch('click', targetId); },
+    // Press on one target, release on another: the click lands on their common ancestor.
+    drag: (fromId, toId) => { dispatch('mousedown', fromId); if (fromId === toId) dispatch('click', fromId); else dispatch('click', null); },
+    actions: () => calls.filter((c) => c !== 'overlay_state'),
+    calls,
+    shown: () => /\bon\b/.test(element('flash').className),
+  };
+}
+const full = (changes = {}) => ({
+  level: 'amber', spo2: 86, mode: 'fullscreen', device_name: 'Baby', signal_lost: false,
+  message: '', snooze_seconds: 15, can_acknowledge: true, ...changes,
+});
+const ARM = 1500;
+
 test('overlay replaces held vitals with signal-loss and server messages in either monitor mode', async () => {
-  const p = page('desktop/src-tauri/ui-placeholder/overlay.html', { desktop: true, initial: { level: 'none' } });
+  const p = overlayPage();
   await flush();
   for (const mode of ['border', 'fullscreen']) {
     p.push({ level: 'amber', mode, signal_lost: true, spo2: 80, message: 'Dashboard server not responding' });
-    assert.equal(p.element('big').textContent, 'Signal lost');
-    assert.equal(p.element('who').textContent, 'Dashboard server not responding');
+    // The held 80 % is gone: no number, the reading row hidden, "Signal lost" in its place.
+    assert.equal(p.element('num').textContent, '');
+    assert.equal(p.element('reading').hidden, true);
+    assert.equal(p.element('bigtext').textContent, 'Signal lost');
+    assert.equal(p.element('bigtext').hidden, false);
+    // Border mode shows only the status line and message (CSS), so it says it there too.
+    assert.match(p.element('status').textContent, mode === 'border' ? /Signal lost/ : /No oxygen readings/);
+    assert.equal(p.element('msg').textContent, 'Dashboard server not responding');
     assert.match(p.element('flash').className, /signal-lost/);
+    for (const id of ['status', 'num', 'bigtext', 'msg', 'dev', 'hint']) {
+      assert.doesNotMatch(p.element(id).textContent, /80/, id);
+    }
   }
   p.push({ level: 'red', mode: 'fullscreen', signal_lost: false, spo2: 84 });
-  assert.equal(p.element('big').textContent, 'SpO₂ 84%');
+  assert.equal(p.element('num').textContent, '84');
+  assert.equal(p.element('reading').hidden, false);
+  assert.equal(p.element('bigtext').hidden, true);
+  assert.equal(p.element('status').textContent, 'RED ALERT — Low oxygen');
   assert.doesNotMatch(p.element('flash').className, /signal-lost/);
 });
 
 test('overlay preserves flash phase on repeated pushes and restarts on level, mode or visibility changes', async () => {
-  const p = page('desktop/src-tauri/ui-placeholder/overlay.html', { desktop: true, initial: { level: 'none' } });
+  const p = overlayPage();
   await flush();
   let value = { level: 'amber', mode: 'border', spo2: 88 };
   p.push(value);
@@ -253,6 +334,173 @@ test('overlay preserves flash phase on repeated pushes and restarts on level, mo
   p.intervals.get(500)();
   p.push(value);
   assert.match(p.element('flash').className, /full lit/);
+});
+
+test('overlay catches up through overlay_state and flashes no faster than 1 Hz', async () => {
+  const p = overlayPage({ initial: full({ level: 'red' }) });
+  await flush();
+  assert.equal(p.calls[0], 'overlay_state');
+  assert.match(p.element('flash').className, /\bon red full lit\b/);
+  assert.deepEqual([...p.intervals.keys()], [500]);  // lit/unlit every 500 ms = one cycle a second
+});
+
+test('overlay snooze text uses snooze_seconds, 15 s when missing or invalid', async () => {
+  const p = overlayPage();
+  await flush();
+  p.push(full({ snooze_seconds: 45 }));
+  assert.equal(p.element('hint').textContent, 'Click anywhere to snooze 45 s');
+  const missing = full();
+  delete missing.snooze_seconds;
+  p.push(missing);
+  assert.equal(p.element('hint').textContent, 'Click anywhere to snooze 15 s');
+  p.push(full({ snooze_seconds: null }));
+  assert.equal(p.element('hint').textContent, 'Click anywhere to snooze 15 s');
+});
+
+test('overlay wording differs by tier, not only colour', async () => {
+  const p = overlayPage();
+  await flush();
+  p.push(full({ level: 'amber' }));
+  assert.equal(p.element('status').textContent, 'WARNING — Low oxygen');
+  assert.equal(p.element('icon-amber').attrs.hidden, false);
+  assert.equal(p.element('icon-red').attrs.hidden, true);
+  p.push(full({ level: 'red' }));
+  assert.equal(p.element('status').textContent, 'RED ALERT — Low oxygen');
+  assert.equal(p.element('icon-amber').attrs.hidden, true);
+  assert.equal(p.element('icon-red').attrs.hidden, false);
+});
+
+test('overlay "I\'m checking" click invokes acknowledge_alert only and hides the overlay', async () => {
+  const p = overlayPage();
+  await flush();
+  p.push(full());
+  assert.equal(p.element('ack').hidden, false);
+  p.advance(ARM);
+  p.intervals.get(500)();
+  assert.doesNotMatch(p.element('ack').className, /arming/);
+  p.click('ack-btn');
+  await flush();
+  assert.deepEqual(p.actions(), ['acknowledge_alert']);
+  assert.equal(p.shown(), false);
+  // Nothing more fires once it is hidden.
+  p.click('ack-btn');
+  p.click(null);
+  await flush();
+  assert.deepEqual(p.actions(), ['acknowledge_alert']);
+});
+
+test('overlay mousedown anywhere but the button invokes snooze_alert only and hides the overlay', async () => {
+  for (const button of [0, 2]) {
+    const p = overlayPage();
+    await flush();
+    p.push(full({ level: 'red' }));
+    p.advance(ARM);
+    p.click(null, button);
+    await flush();
+    assert.deepEqual(p.actions(), ['snooze_alert'], `mouse button ${button}`);
+    assert.equal(p.shown(), false);
+  }
+});
+
+test('overlay button: right press snoozes; press then drag off does neither and keeps flashing', async () => {
+  let p = overlayPage();
+  await flush();
+  p.push(full());
+  p.advance(ARM);
+  p.click('ack-btn', 2);
+  await flush();
+  assert.deepEqual(p.actions(), ['snooze_alert']);
+
+  p = overlayPage();
+  await flush();
+  p.push(full());
+  p.advance(ARM);
+  p.drag('ack-btn', null);
+  await flush();
+  assert.deepEqual(p.actions(), []);
+  assert.equal(p.shown(), true);
+  p.intervals.get(500)();
+  assert.match(p.element('flash').className, /\bon amber full\b/);
+  // Pressing elsewhere and dragging onto the button snoozes at the press.
+  p.drag(null, 'ack-btn');
+  await flush();
+  assert.deepEqual(p.actions(), ['snooze_alert']);
+});
+
+test('overlay button warm-up: an early press snoozes; escalation re-arms, same-level updates do not', async () => {
+  let p = overlayPage();
+  await flush();
+  p.push(full());
+  assert.match(p.element('ack').className, /arming/);
+  p.advance(300);
+  p.click('ack-btn');
+  await flush();
+  assert.deepEqual(p.actions(), ['snooze_alert']);
+  assert.equal(p.shown(), false);
+
+  // Just before the end of the warm-up it is still a snooze target.
+  p = overlayPage();
+  await flush();
+  p.push(full());
+  p.advance(ARM - 1);
+  p.click('ack-btn');
+  await flush();
+  assert.deepEqual(p.actions(), ['snooze_alert']);
+
+  // A same-level update keeps the button live.
+  p = overlayPage();
+  await flush();
+  p.push(full());
+  p.advance(ARM);
+  p.push(full({ spo2: 85 }));
+  p.click('ack-btn');
+  await flush();
+  assert.deepEqual(p.actions(), ['acknowledge_alert']);
+
+  // Amber -> red restarts the warm-up.
+  p = overlayPage();
+  await flush();
+  p.push(full());
+  p.advance(ARM);
+  p.push(full({ level: 'red' }));
+  p.click('ack-btn');
+  await flush();
+  assert.deepEqual(p.actions(), ['snooze_alert']);
+});
+
+test('overlay border mode invokes neither snooze nor acknowledge and has no button', async () => {
+  for (const changes of [{ level: 'red' }, { signal_lost: true, spo2: null, message: 'Dashboard server not responding' }]) {
+    const p = overlayPage();
+    await flush();
+    p.push(full({ mode: 'border', ...changes }));
+    assert.equal(p.element('ack').hidden, true);
+    assert.match(p.element('flash').className, /\bborder\b/);
+    p.advance(ARM);
+    p.click(null);
+    p.click('ack-btn');
+    p.click(null, 2);
+    await flush();
+    assert.deepEqual(p.actions(), []);
+    assert.equal(p.shown(), true);
+  }
+});
+
+test('overlay hides the button when can_acknowledge is not true, and level none hides everything', async () => {
+  const p = overlayPage();
+  await flush();
+  p.push(full({ can_acknowledge: false }));
+  assert.equal(p.element('ack').hidden, true);
+  p.advance(ARM);
+  p.click('ack-btn');
+  await flush();
+  assert.deepEqual(p.actions(), ['snooze_alert']);
+  p.push(full());
+  p.push({ level: 'none' });
+  assert.equal(p.element('flash').className, '');
+  p.click(null);
+  p.click('ack-btn');
+  await flush();
+  assert.deepEqual(p.actions(), ['snooze_alert']);
 });
 
 // ---- v0.2 widget (V8) ------------------------------------------------------
