@@ -29,6 +29,12 @@ alarm sound).
 |---|---|---|
 | ![Tonight page](docs/screenshots/tonight.png) | ![Rhythms page](docs/screenshots/rhythms.png) | ![Data workbench](docs/screenshots/data.png) |
 
+| Amber warning over a game | Red alert over a browser |
+|---|---|
+| ![Amber low-oxygen warning shown full screen over a game](docs/screenshots/alert-amber.png) | ![Red low-oxygen alert shown full screen over a web browser](docs/screenshots/alert-red.png) |
+
+The alert pictures are mock-ups: the real desktop overlay page drawn over a made-up game and web page. On screen it flashes about once a second. Not a medical alarm.
+
 Screenshots use made-up demo data.
 
 ## What this fork adds (v0.2)
