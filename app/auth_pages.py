@@ -308,7 +308,7 @@ _LANDING = """<!doctype html>
       <div class="fine">
         <p>{privacy_copy}</p>
         <p>Free, open source, and unofficial — provided as-is, not affiliated with Owlet Baby
-          Care. <a href="https://github.com/pbozzay/owlet-dashboard" rel="noopener">View the
+          Care. <a href="https://github.com/petemess95/owlet-dashboard" rel="noopener">View the
           project on GitHub</a>.</p>
         <p>Retrospective trend viewing only — not a medical monitor or alert replacement.</p>
       </div>

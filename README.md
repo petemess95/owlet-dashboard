@@ -1,4 +1,7 @@
-# Owlet Dashboard
+# Owlet Dashboard (petemess95 fork)
+
+> Forked from [pbozzay/owlet-dashboard](https://github.com/pbozzay/owlet-dashboard). All
+> credit for the original project goes to pbozzay; this fork adds the v0.2 changes below.
 
 An **unofficial**, open-source, provided-as-is history collector and dashboard for Owlet
 Dream Sock / Smart Sock data. Not affiliated with or endorsed by Owlet Baby Care.
@@ -22,9 +25,29 @@ alarm sound).
 
 ![Today page](docs/screenshots/today.png)
 
+| Tonight | Rhythms | Data |
+|---|---|---|
+| ![Tonight page](docs/screenshots/tonight.png) | ![Rhythms page](docs/screenshots/rhythms.png) | ![Data workbench](docs/screenshots/data.png) |
+
+Screenshots use made-up demo data.
+
+## What this fork adds (v0.2)
+
+- **Desktop alerts:** an always-on-top widget (three sizes, sparkline, "armed" dot), a
+  monitor flash, and a WASAPI alarm that can unmute and raise the volume on red.
+- **Snooze and acknowledge:** an "I'm checking" button, configurable snooze length, global
+  hotkeys, and snooze from a game controller button.
+- **Fits around gaming:** detects fullscreen games, keeps the overlay out of screen captures,
+  and adds a live tray icon showing the current SpO₂.
+- **Windows integration:** start with Windows, start hidden, keep-awake while armed, and a
+  first-run walk-through.
+- **Redesigned pages:** Today, Tonight, Rhythms and the sign-in pages use a new night-sky
+  theme. Frozen vitals are hidden while the base station is off.
+- **No auto-updater:** install new versions by hand from the releases page.
+
 ## Windows desktop app
 
-[Download the installer](https://github.com/pbozzay/owlet-dashboard/releases/latest). On
+[Download the installer](https://github.com/petemess95/owlet-dashboard/releases/latest). On
 first launch, choose a mode:
 
 - **Collect on this PC** — standalone; records only while the app is open and the PC is
@@ -42,7 +65,7 @@ on PC alerts, press **Test amber** / **Test red** in **Settings → This PC**. S
 docker run -d --name owlet-dashboard \
   -p 8888:8888 \
   -v /path/to/appdata/owlet-dashboard:/data \
-  ghcr.io/pbozzay/owlet-dashboard:latest
+  ghcr.io/petemess95/owlet-dashboard:latest
 ```
 
 Data (SQLite) lives in `/data`. The container runs as `1000:1000` by default; set `PUID`/`PGID`

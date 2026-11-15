@@ -2,7 +2,7 @@ name: docker
 
 on:
   push:
-    branches: [main, multi-user]
+    branches: [main, multi-user, v0.2]
 
 jobs:
   test:

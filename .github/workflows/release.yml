@@ -128,12 +128,7 @@ jobs:
         export OUT="Owlet-Dashboard-${VER}-windows-setup.exe"
         mkdir -p dist-installer
         SETUP=$(ls "desktop/src-tauri/target/release/bundle/nsis/"*-setup.exe | head -1)
-        export SIGFILE=$(ls "desktop/src-tauri/target/release/bundle/nsis/"*-setup.exe.sig | head -1)
         cp "$SETUP" "dist-installer/$OUT"
-        # latest.json is what the app polls; the endpoint resolves to the newest
-        # release's copy, so an older app sees the new version + its signature.
-        VER="$VER" python desktop/ci/make_latest_json.py > dist-installer/latest.json
-        echo "--- latest.json ---"; cat dist-installer/latest.json
 
     - uses: actions/upload-artifact@v4
       with:
@@ -162,7 +157,6 @@ jobs:
         name: Release ${{ steps.version.outputs.version }}
         files: |
           dist-installer/*.exe
-          dist-installer/latest.json
         body: |
           ## Desktop app (Windows)
 
@@ -172,20 +166,16 @@ jobs:
           running**; for gapless 24/7 history run the Docker version and use the desktop
           app as a viewer.
 
-          **Automatic updates:** the app checks for a new release on launch and installs it
-          (also available from the window's **Instance → Check for updates…** menu). Updates
-          are signed and verified, so this is the last version you'll need to install by hand.
-
           ## Docker Image
 
-          - **GHCR** (published from main): `ghcr.io/pbozzay/owlet-dashboard:latest`
+          - **GHCR** (published from the default branch): `ghcr.io/${{ github.repository }}:latest`
           - **Docker Hub** (when enabled): `${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}` / `${{ env.IMAGE_NAME }}:latest`
 
           ### Unraid update instructions
           1. In the Unraid dashboard, click "Check for Updates" on the owlet-dashboard container
           2. Click "Update" when available
 
-          **New install**: add a container with repository `ghcr.io/pbozzay/owlet-dashboard:latest`,
+          **New install**: add a container with repository `ghcr.io/${{ github.repository }}:latest`,
           map port `8888`, and map `/data` to an appdata share (optionally `PUID=99` / `PGID=100`
           so files are owned by `nobody:users`). Put your reverse proxy in front with HTTPS
           (the app trusts `X-Forwarded-*`). Do **not** set `SEED_DEFAULT_ADMIN` on an
@@ -196,7 +186,7 @@ jobs:
           docker run -d --name owlet-dashboard \
             -p 8888:8888 \
             -v /path/to/appdata/owlet-dashboard:/data \
-            ghcr.io/pbozzay/owlet-dashboard:latest
+            ghcr.io/${{ github.repository }}:latest
           ```
         draft: false
         prerelease: false

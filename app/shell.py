@@ -656,7 +656,7 @@ def render_shell(
         <section class="install-opt">
           <h3>Or get the Windows desktop app</h3>
           <p>Download the installer from the releases page:</p>
-          <a class="install-cta" href="https://github.com/pbozzay/owlet-dashboard/releases/latest"
+          <a class="install-cta" href="https://github.com/petemess95/owlet-dashboard/releases/latest"
             target="_blank" rel="noopener noreferrer">Open the releases page →</a>
           <p class="install-hint"><b>You pick how it runs on first launch:</b></p>
           <ul class="install-modes">
